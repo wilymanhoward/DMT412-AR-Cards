@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<QCARConfig>
+  <Tracking>
+    <ImageTarget name="howard-wilyman-card" size="1.000000 0.600000" />
+    <ImageTarget name="christmas-card-ar-target1" size="1.000000 0.708333" />
+  </Tracking>
+</QCARConfig>
