@@ -14,7 +14,7 @@ public class GiftBox : MonoBehaviour
 
     bool ready;
     float nextShake;
-    Vector3 baseScale;
+    Vector3 baseScale, restPosition;
     Quaternion baseRotation;
 
     void Awake() => baseScale = transform.localScale;
@@ -24,6 +24,7 @@ public class GiftBox : MonoBehaviour
     {
         ready = true;
         baseRotation = transform.localRotation;
+        restPosition = transform.localPosition;
         glow.Play();
         nextShake = Time.time + Random.Range(1f, 2.5f);
     }
@@ -56,8 +57,9 @@ public class GiftBox : MonoBehaviour
     {
         if (Opened || !ready) return;
         Opened = true;
-        StopAllCoroutines();
+        StopAllCoroutines(); // may cut a shake mid-hop, so put the box back down
         transform.localRotation = baseRotation;
+        transform.localPosition = restPosition;
         StartCoroutine(OpenRoutine());
     }
 
@@ -76,7 +78,7 @@ public class GiftBox : MonoBehaviour
         controller.fx.Confetti(top);
         controller.fx.Sparkle(top);
         yield return new WaitForSeconds(0.1f);
-        controller.ReleaseReward(this, top);
+        controller.ReleaseReward(top);
     }
 
     IEnumerator PopLid()

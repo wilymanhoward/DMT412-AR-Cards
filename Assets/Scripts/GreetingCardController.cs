@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using Vuforia;
 
 // Runs the Christmas card as a state machine:
 //   Idle → Scanned → TreeUp → SantaArriving → GiftsReady ⇄ Opening → Finished
-// Losing the card pauses everything (Time.timeScale = 0) and shows "Find the card again"; progress is kept.
+// Losing the card (not TRACKED for lostGrace seconds) pauses everything (Time.timeScale = 0)
+// and shows "Find the card again"; progress is kept.
 // All references are filled in by Tools > Christmas Card > 2. Build Greeting Card.
 public class GreetingCardController : MonoBehaviour
 {
@@ -23,6 +25,7 @@ public class GreetingCardController : MonoBehaviour
 
     [Header("Scene")]
     public Camera arCamera;
+    public float lostGrace = 0.5f; // ignores brief TRACKED ↔ EXTENDED_TRACKED flickers
     public Transform content;      // under the image target; card is 1 unit wide, ~0.71 deep
     public Transform tree;         // pivot at the base centre
     public TreeLights treeLights;
@@ -65,19 +68,42 @@ public class GreetingCardController : MonoBehaviour
     Vector3 santaScale;
     Vector3 sleighPrev, sleighForward = Vector3.forward;
     float sleighRoll;
+    ObserverBehaviour cardTarget;
+    bool cardVisible;
+    float notTrackedSince = -1;
 
     void Awake()
     {
         Application.targetFrameRate = 60;
         treeRotation = tree.localRotation;
         santaScale = santa.localScale;
+        cardTarget = content.GetComponentInParent<ObserverBehaviour>(); // the image target the card content lives under
+        cardTarget.OnTargetStatusChanged += OnCardStatus;
         ResetScene();
         SetState(State.Idle);
     }
 
-    // ---------- Tracking (wired to the Image Target's On Target Found / Lost) ----------
+    void OnDestroy()
+    {
+        if (cardTarget) cardTarget.OnTargetStatusChanged -= OnCardStatus;
+    }
 
-    public void OnCardFound()
+    // ---------- Tracking ----------
+    // Only a camera-confirmed TRACKED counts as found. EXTENDED_TRACKED is what Vuforia reports when the
+    // card leaves the view (the phone is guessing), so it counts as lost once it lasts longer than lostGrace.
+
+    void OnCardStatus(ObserverBehaviour _, TargetStatus status)
+    {
+        if (status.Status == Status.TRACKED)
+        {
+            notTrackedSince = -1;
+            if (!cardVisible) { cardVisible = true; OnCardFound(); }
+        }
+        else if (cardVisible && notTrackedSince < 0)
+            notTrackedSince = Time.unscaledTime;
+    }
+
+    void OnCardFound()
     {
         if (Current == State.Idle) { SetState(State.Scanned); return; }
         Time.timeScale = 1;
@@ -85,7 +111,7 @@ public class GreetingCardController : MonoBehaviour
         lostScreen.SetActive(false);
     }
 
-    public void OnCardLost()
+    void OnCardLost()
     {
         if (Current == State.Idle) return;
         Time.timeScale = 0;          // freezes every tween, particle and animator
@@ -280,6 +306,13 @@ public class GreetingCardController : MonoBehaviour
 
     void Update()
     {
+        if (notTrackedSince >= 0 && Time.unscaledTime - notTrackedSince > lostGrace)
+        {
+            notTrackedSince = -1;
+            cardVisible = false;
+            OnCardLost();
+        }
+
         if (Time.timeScale == 0 || !TapStarted(out Vector2 screen)) return;
         var hits = Physics.RaycastAll(arCamera.ScreenPointToRay(screen), 100f);
 
@@ -308,7 +341,7 @@ public class GreetingCardController : MonoBehaviour
 
     public void OnGiftOpening() => SetState(State.Opening);
     public void PlayPop() => PlaySfx(popClip);
-    public void ReleaseReward(GiftBox box, Vector3 top) => StartCoroutine(RewardRoutine(top));
+    public void ReleaseReward(Vector3 top) => StartCoroutine(RewardRoutine(top));
 
     IEnumerator RewardRoutine(Vector3 top)
     {
