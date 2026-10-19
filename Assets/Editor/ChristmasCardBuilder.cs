@@ -114,14 +114,12 @@ public static class ChristmasCardBuilder
 
         // wiring: card found/lost and every button
         var handler = target.GetComponent<DefaultObserverEventHandler>();
-        // The card flickers between TRACKED and EXTENDED_TRACKED; counting both as found stops
-        // the "Find the card again" pause from flashing on every flicker. Smoothing calms the jitter.
+        // Keep the content drawn through brief EXTENDED_TRACKED flickers; the controller decides
+        // "lost" itself from the card's status (with a grace delay). Smoothing calms the jitter.
         handler.StatusFilter = DefaultObserverEventHandler.TrackingStatusFilter.Tracked_ExtendedTracked;
         handler.UsePoseSmoothing = true;
         Clear(handler.OnTargetFound);
         Clear(handler.OnTargetLost);
-        UnityEventTools.AddVoidPersistentListener(handler.OnTargetFound, c.OnCardFound);
-        UnityEventTools.AddVoidPersistentListener(handler.OnTargetLost, c.OnCardLost);
         UnityEventTools.AddVoidPersistentListener(ui.startButton.onClick, c.StartExperience);
         UnityEventTools.AddVoidPersistentListener(ui.giftButton.onClick, c.GetYourGift);
         UnityEventTools.AddVoidPersistentListener(ui.soundButton.onClick, c.ToggleSound);
