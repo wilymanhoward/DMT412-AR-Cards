@@ -103,7 +103,7 @@ public static class ChristmasCardBuilder
         c.treeTapClip = FindClip("boing", "jingle", "tap");
         c.finaleClip = FindClip("finale");
 
-        c.scanScreen = ui.scan;
+        c.uiRoot = ui.root;
         c.startScreen = ui.start;
         c.hud = ui.hud;
         c.lostScreen = ui.lost;
@@ -134,6 +134,12 @@ public static class ChristmasCardBuilder
         // no realtime shadows: keeps mid-range phones well above 30 fps
         foreach (var light in Object.FindObjectsByType<Light>()) light.shadows = LightShadows.None;
 
+        // the hub owns tracking: neutral home screen until the card is seen, then the Christmas experience
+        var hub = new GameObject("Card Hub").AddComponent<CardHub>();
+        hub.homeScreen = BuildHomeUI();
+        hub.greeting = c;
+        ui.root.SetActive(false);
+
         EditorSceneManager.MarkSceneDirty(target.scene);
         EditorSceneManager.SaveScene(target.scene);
         Selection.activeGameObject = content.gameObject;
@@ -150,7 +156,7 @@ public static class ChristmasCardBuilder
             var old = target.Find(n);
             if (old) Object.DestroyImmediate(old.gameObject);
         }
-        foreach (var n in new[] { "Greeting UI", "Greeting Templates", "Greeting Controller" })
+        foreach (var n in new[] { "Greeting UI", "Greeting Templates", "Greeting Controller", "Home UI", "Card Hub" })
         {
             var old = GameObject.Find(n) ?? FindInactiveRoot(n);
             if (old) Object.DestroyImmediate(old);
@@ -645,7 +651,7 @@ public static class ChristmasCardBuilder
 
     class Ui
     {
-        public GameObject scan, start, hud, lost, finish;
+        public GameObject root, start, hud, lost, finish;
         public Button startButton, giftButton, soundButton, restartButton, againButton;
         public Text guideText, soundLabel;
         public Image soundIcon;
@@ -664,17 +670,8 @@ public static class ChristmasCardBuilder
         font = bodyPath != null ? Load<Font>(bodyPath) : Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         titleFont = titlePath != null ? Load<Font>(titlePath) : font;
 
-        var canvasGo = new GameObject("Greeting UI", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
-        var canvas = canvasGo.GetComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 10;
-        var scaler = canvasGo.GetComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1080, 1920);
-        scaler.matchWidthOrHeight = 0.5f;
-        canvasGo.AddComponent<CanvasOrientation>(); // portrait on the phone, landscape in the editor
-        var root = canvasGo.transform;
-        var ui = new Ui();
+        var root = NewCanvas("Greeting UI", 10);
+        var ui = new Ui { root = root.gameObject };
         Vector2 top = new Vector2(0.5f, 1), bottom = new Vector2(0.5f, 0), centre = new Vector2(0.5f, 0.5f);
 
         // reward name tags: a rounded tag that follows each reward (behind every screen)
@@ -693,27 +690,7 @@ public static class ChristmasCardBuilder
         SnowCap(guide.transform, 900);
         Holly(guide.transform, new Vector2(-425, 48), 96, -15);
         Holly(guide.transform, new Vector2(425, 48), 96, 15);
-        ui.guideText = Label("Point your camera at your Christmas card", guide.transform, 36, Color.white, centre, new Vector2(0, -4), new Vector2(780, 116), Hex("0A2A14"));
-
-        // Idle: a frame showing where to aim
-        ui.scan = Stretch("Scan Screen", root).gameObject;
-        var frame = Rect("Scan Frame", ui.scan.transform, centre, new Vector2(0, 40), new Vector2(760, 540));
-        var framePulse = frame.gameObject.AddComponent<UIPulse>();
-        framePulse.scaleAmount = 0.03f;
-        framePulse.speed = 2.5f;
-        for (int i = 0; i < 4; i++)
-        {
-            var corner = Rect("Corner", frame, new Vector2(i % 2, i / 2), Vector2.zero, new Vector2(120, 120)).gameObject.AddComponent<Image>();
-            corner.sprite = cornerSprite;
-            corner.color = new Color(1, 1, 1, 0.95f);
-            corner.raycastTarget = false;
-            // sprite is the top-left corner; rotate it into each corner of the frame
-            corner.rectTransform.localEulerAngles = new Vector3(0, 0, new[] { 90f, 180f, 0f, 270f }[i]);
-            corner.rectTransform.anchoredPosition = new Vector2(i % 2 == 0 ? 50 : -50, i / 2 == 0 ? 50 : -50);
-        }
-        var bigFlake = Deco(frame, centre, Vector2.zero, 260, 15, 0.35f);
-        bigFlake.GetComponent<UIPulse>().alphaAmount = 0.5f;
-        Label("Fit the whole card inside the frame", ui.scan.transform, 40, Cream, centre, new Vector2(0, -300), new Vector2(1000, 80), Hex("102A1A"));
+        ui.guideText = Label("Card found! Tap Start to begin", guide.transform, 36, Color.white, centre, new Vector2(0, -4), new Vector2(780, 116), Hex("0A2A14"));
 
         // Scanned: Start
         ui.start = Stretch("Start Screen", root).gameObject;
@@ -754,7 +731,53 @@ public static class ChristmasCardBuilder
         return ui;
     }
 
-    // A wire draped in three swags across the top of the screen, with coloured bulbs that twinkle out of sync.
+    // Neutral app home: not Christmas, not business. Shown until a card is seen, and again after one is lost.
+    static GameObject BuildHomeUI()
+    {
+        var root = NewCanvas("Home UI", 5);
+        Vector2 top = new Vector2(0.5f, 1), bottom = new Vector2(0.5f, 0), centre = new Vector2(0.5f, 0.5f);
+        Color glass = new Color(0.1f, 0.12f, 0.16f, 0.8f), soft = new Color(1, 1, 1, 0.3f), ink = Hex("0B0E14");
+
+        var header = Panel("Header", root, top, new Vector2(0, -150), new Vector2(760, 170), glass, soft);
+        Label("AR Cards", header.transform, 66, Color.white, centre, new Vector2(0, 22), new Vector2(740, 90), ink);
+        Label("Greeting & business cards that come alive", header.transform, 30, Hex("C9D3DF"), centre, new Vector2(0, -42), new Vector2(740, 50), ink);
+
+        // a frame showing where to aim
+        var frame = Rect("Scan Frame", root, centre, new Vector2(0, 40), new Vector2(760, 540));
+        var framePulse = frame.gameObject.AddComponent<UIPulse>();
+        framePulse.scaleAmount = 0.03f;
+        framePulse.speed = 2.5f;
+        for (int i = 0; i < 4; i++)
+        {
+            var corner = Rect("Corner", frame, new Vector2(i % 2, i / 2), Vector2.zero, new Vector2(120, 120)).gameObject.AddComponent<Image>();
+            corner.sprite = cornerSprite;
+            corner.color = new Color(1, 1, 1, 0.95f);
+            corner.raycastTarget = false;
+            // sprite is the top-left corner; rotate it into each corner of the frame
+            corner.rectTransform.localEulerAngles = new Vector3(0, 0, new[] { 90f, 180f, 0f, 270f }[i]);
+            corner.rectTransform.anchoredPosition = new Vector2(i % 2 == 0 ? 50 : -50, i / 2 == 0 ? 50 : -50);
+        }
+
+        var hint = Panel("Hint", root, bottom, new Vector2(0, 150), new Vector2(900, 170), glass, soft);
+        Label("Point your camera at your\ngreeting card or business card", hint.transform, 38, Color.white, centre, Vector2.zero, new Vector2(860, 160), ink);
+        return root.gameObject;
+    }
+
+    static RectTransform NewCanvas(string name, int order)
+    {
+        var go = new GameObject(name, typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+        var canvas = go.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = order;
+        var scaler = go.GetComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1080, 1920);
+        scaler.matchWidthOrHeight = 0.5f;
+        go.AddComponent<CanvasOrientation>(); // portrait on the phone, landscape in the editor
+        return go.GetComponent<RectTransform>();
+    }
+
+    // A wire draped in swags across the top of the screen (wider than any screen), with coloured bulbs that twinkle out of sync.
     static void ChristmasLights(Transform root)
     {
         var strip = Rect("Christmas Lights", root, new Vector2(0.5f, 1), Vector2.zero, Vector2.zero);
@@ -866,14 +889,14 @@ public static class ChristmasCardBuilder
         return b;
     }
 
-    static Image Panel(string name, Transform parent, Vector2 anchor, Vector2 pos, Vector2 size, Color colour)
+    static Image Panel(string name, Transform parent, Vector2 anchor, Vector2 pos, Vector2 size, Color colour, Color? rimColour = null)
     {
         var img = Rect(name, parent, anchor, pos, size).gameObject.AddComponent<Image>();
         img.sprite = roundSprite;
         img.type = Image.Type.Sliced;
         img.color = colour;
         var rim = img.gameObject.AddComponent<Outline>();
-        rim.effectColor = Gold;
+        rim.effectColor = rimColour ?? Gold;
         rim.effectDistance = new Vector2(5, -5);
         var shadow = img.gameObject.AddComponent<Shadow>();
         shadow.effectColor = new Color(0, 0, 0, 0.35f);
