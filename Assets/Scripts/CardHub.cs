@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using Vuforia;
 
@@ -5,6 +6,7 @@ using Vuforia;
 // (theme, UI, music) takes over. Only a camera-confirmed TRACKED counts as found; EXTENDED_TRACKED is
 // what Vuforia reports when the card leaves the view, so after lostGrace seconds of it the card is lost
 // ("Find the card again"), and after homeDelay more seconds the app returns home. Progress is kept.
+// Switching screens cross-fades; the Christmas UI plays its own entrance (RevealBurst, UISlideIn).
 // shortcut: handles one card (the greeting card); when the business card gets its own experience,
 // turn `greeting` into a list and give each card its own pause instead of Time.timeScale.
 public class CardHub : MonoBehaviour
@@ -16,9 +18,12 @@ public class CardHub : MonoBehaviour
 
     bool found;
     float notTrackedSince = -1, lostSince = -1;
+    CanvasGroup homeGroup, cardGroup;
 
     void Start()
     {
+        homeGroup = Group(homeScreen);
+        cardGroup = Group(greeting.uiRoot);
         greeting.content.GetComponentInParent<ObserverBehaviour>().OnTargetStatusChanged += OnStatus;
         greeting.SetShown(false);
         homeScreen.SetActive(true);
@@ -31,9 +36,11 @@ public class CardHub : MonoBehaviour
             notTrackedSince = lostSince = -1;
             if (found) return;
             found = true;
-            homeScreen.SetActive(false);
-            greeting.SetShown(true);
+            StopAllCoroutines();
+            cardGroup.alpha = 1;
+            greeting.SetShown(true);   // its entrance animations start as it becomes active
             greeting.OnCardFound();
+            StartCoroutine(Fade(homeGroup, homeGroup.alpha, 0, 0.35f, () => homeScreen.SetActive(false)));
         }
         else if (found && notTrackedSince < 0)
             notTrackedSince = Time.unscaledTime;
@@ -52,8 +59,27 @@ public class CardHub : MonoBehaviour
         if (lostSince >= 0 && now - lostSince > homeDelay)
         {
             lostSince = -1;
-            greeting.SetShown(false);
-            homeScreen.SetActive(true);
+            StartCoroutine(GoHome());
         }
+    }
+
+    IEnumerator GoHome()
+    {
+        yield return Fade(cardGroup, 1, 0, 0.3f, () => greeting.SetShown(false));
+        cardGroup.alpha = 1;
+        homeScreen.SetActive(true);
+        yield return Fade(homeGroup, 0, 1, 0.4f, null);
+    }
+
+    static IEnumerator Fade(CanvasGroup group, float from, float to, float duration, System.Action done)
+    {
+        yield return Ease.RunUnscaled(duration, t => group.alpha = Mathf.Lerp(from, to, Ease.InOutSine(t)));
+        done?.Invoke();
+    }
+
+    static CanvasGroup Group(GameObject go)
+    {
+        var g = go.GetComponent<CanvasGroup>(); // not ??: Unity's "missing component" isn't a real C# null
+        return g ? g : go.AddComponent<CanvasGroup>();
     }
 }
