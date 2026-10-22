@@ -8,6 +8,7 @@ public class UIPulse : MonoBehaviour
     public float alphaAmount = 0f;   // 0..1: how much the alpha dips
     public float rotateSpeed = 0f;   // degrees per second
     public float speed = 2f;
+    public float phase = 0f;         // offsets the cycle so neighbours don't pulse in sync
 
     Vector3 baseScale;
     Graphic graphic;
@@ -22,7 +23,7 @@ public class UIPulse : MonoBehaviour
 
     void Update()
     {
-        float s = Mathf.Sin(Time.unscaledTime * speed);
+        float s = Mathf.Sin(Time.unscaledTime * speed + phase);
         transform.localScale = baseScale * (1 + scaleAmount * s);
         if (rotateSpeed != 0) transform.Rotate(0, 0, rotateSpeed * Time.unscaledDeltaTime);
         if (graphic && alphaAmount > 0)
