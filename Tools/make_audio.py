@@ -280,6 +280,17 @@ def tree_tap():
     return out
 
 
+def hand_bell():
+    """A big hand bell: low strong strike, bright overtones, long ring, a shake of jingles."""
+    out = silence(2.6)
+    mix(out, bell(79, 2.5, 0.35), 0)
+    mix(out, bell(86, 2.0, 0.18), 0)
+    mix(out, bell(91, 1.4, 0.1), 0.01)
+    mix(out, jingle(1.2), 0)
+    mix(out, jingle(0.7), 0.09)
+    return out
+
+
 if __name__ == "__main__":
     folder = sys.argv[1]
     os.makedirs(folder, exist_ok=True)
@@ -294,3 +305,4 @@ if __name__ == "__main__":
     write(folder, "firework.wav", firework(), peak=0.7)
     write(folder, "whoosh.wav", whoosh(), peak=0.6)
     write(folder, "tree_jingle.wav", tree_tap())
+    write(folder, "hand_bell_ring.wav", hand_bell())

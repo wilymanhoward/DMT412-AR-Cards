@@ -8,6 +8,7 @@ public class GiftBox : MonoBehaviour
     public Transform lid;          // pivot at the lid's centre so it tumbles around itself
     public ParticleSystem glow;
     public float height = 0.13f;   // set by the builder
+    public bool golden;            // Santa's present: always a rare reward
 
     [HideInInspector] public GreetingCardController controller;
     public bool Opened { get; private set; }
@@ -78,7 +79,7 @@ public class GiftBox : MonoBehaviour
         controller.fx.Confetti(top);
         controller.fx.Sparkle(top);
         yield return new WaitForSeconds(0.1f);
-        controller.ReleaseReward(top);
+        controller.ReleaseReward(top, golden);
     }
 
     IEnumerator PopLid()

@@ -5,13 +5,14 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 // Runs the Christmas card as a state machine:
-//   Idle → Scanned → TreeUp → SantaArriving → GiftsReady ⇄ Opening → Finished
+//   Idle → Scanned → TreeUp → SantaArriving → GiftsReady ⇄ Opening → BellReady → SantaVisit → GoldenGift → Finished
+// Bonus: leaning the phone close to the tree (before the bell) makes Santa peek out, wave and flip away.
 // CardHub decides when the card is found or lost and shows/hides this experience.
 // Losing the card pauses everything (Time.timeScale = 0) and shows "Find the card again"; progress is kept.
 // All references are filled in by Tools > Christmas Card > 2. Build Greeting Card.
 public class GreetingCardController : MonoBehaviour
 {
-    public enum State { Idle, Scanned, TreeUp, SantaArriving, GiftsReady, Opening, Finished }
+    public enum State { Idle, Scanned, TreeUp, SantaArriving, GiftsReady, Opening, BellReady, SantaVisit, GoldenGift, Finished }
 
     [System.Serializable]
     public class Reward
@@ -28,7 +29,7 @@ public class GreetingCardController : MonoBehaviour
     public Transform tree;         // pivot at the base centre
     public TreeLights treeLights;
     public Transform sleigh;       // pivot at its centre, reindeer facing +Z
-    public Transform santa;        // dancing Santa for the finale
+    public Transform santa;        // walks in with the golden present, dances in the finale
     public Transform[] giftSpots;
     public GameObject[] giftTemplates;
     public Reward[] rewards;
@@ -43,12 +44,21 @@ public class GreetingCardController : MonoBehaviour
     public Vector3 flyInFrom = new Vector3(3f, 1.8f, 4f);
     public Vector3 flyOutTo = new Vector3(-3.5f, 2.5f, 4.5f);
 
+    [Header("Ring the bell, Santa visits")]
+    public Transform bell;                         // hanger: pivot at the top so the bell swings
+    public int ringsNeeded = 3;
+    public Transform santaEnter, santaStand, goldenSpot; // drag these in the scene to adjust the walk
+    public GameObject goldenGiftTemplate;
+    public Transform peekHide, peekShow, peekExit; // "lean in" bonus path
+    public float leanDistance = 1.4f;              // card units from the camera to the middle of the tree
+
     [Header("Audio")]
     public AudioSource music;
     public AudioSource bells;      // 3D, on the sleigh: louder as it approaches
     public AudioSource sfx;
     public AudioClip popClip, landClip, sparkleClip, rareClip, fireworksClip, whooshClip, treeTapClip;
-    public AudioClip finaleClip;   // plays once when every gift is open, then the main music returns
+    public AudioClip finaleClip;   // plays once in the finale, then the main music returns
+    public AudioClip bellClip;
     [Range(0, 1)] public float musicVolume = 0.6f;
 
     [Header("UI")]
@@ -60,6 +70,8 @@ public class GreetingCardController : MonoBehaviour
     public Image soundIcon;
     public Sprite soundOnSprite, soundOffSprite;
     public RewardLabel labelTemplate;
+    public GameObject spiritMeter; // "Christmas spirit": one star per bell ring
+    public Image[] spiritStars;
 
     public State Current { get; private set; } = State.Idle;
 
@@ -72,12 +84,20 @@ public class GreetingCardController : MonoBehaviour
     Vector3 sleighPrev, sleighForward = Vector3.forward;
     float sleighRoll;
     AudioClip mainMusic;
+    Animator santaAnim;
+    Vector3 bellScale;
+    int rings;
+    float bellRungAt = -10f, closeSince = -1f;
+    bool peekDone;
+    Coroutine peek;
 
     void Awake()
     {
         Application.targetFrameRate = 60;
         treeRotation = tree.localRotation;
         santaScale = santa.localScale;
+        santaAnim = santa.GetComponentInChildren<Animator>();
+        bellScale = bell.localScale;
         mainMusic = music.clip;
         ResetScene();
         SetState(State.Idle);
@@ -91,6 +111,7 @@ public class GreetingCardController : MonoBehaviour
     {
         uiRoot.SetActive(shown);
         foreach (var r in content.GetComponentsInChildren<Renderer>(true)) r.enabled = shown;
+        if (shown) PlaySfx(sparkleClip); // goes with the UI's reveal burst
     }
 
     public void OnCardFound()
@@ -170,8 +191,7 @@ public class GreetingCardController : MonoBehaviour
         fx.orbitStars.Play();
         StartCoroutine(FadeAudio(music, 0, musicVolume, 2.5f, true));
         treeReady = true;
-        getGiftButton.interactable = true;
-        guideText.text = "Tap \"Get Your Gift\" to call Santa!\nTip: poke the tree!";
+        SetState(State.TreeUp); // enables "Get Your Gift" and updates the guide
     }
 
     // ---------- Sequence 2: Santa flies in, circles, drops gifts, flies off ----------
@@ -303,16 +323,23 @@ public class GreetingCardController : MonoBehaviour
 
     void Update()
     {
-        if (Time.timeScale == 0 || !TapStarted(out Vector2 screen)) return;
+        if (Time.timeScale == 0) return;
+        if (bell.gameObject.activeSelf) SwingBell();
+        CheckLeanIn();
+        if (!TapStarted(out Vector2 screen)) return;
         var hits = Physics.RaycastAll(arCamera.ScreenPointToRay(screen), 100f);
 
         // gifts win over the tree, since they sit under its branches
-        if (Current == State.GiftsReady)
+        if (Current == State.GiftsReady || Current == State.GoldenGift)
             foreach (var hit in hits)
             {
                 var box = hit.collider.GetComponentInParent<GiftBox>();
                 if (box && !box.Opened) { box.Open(); return; }
             }
+
+        if (Current == State.BellReady)
+            foreach (var hit in hits)
+                if (hit.collider.transform.IsChildOf(bell)) { RingBell(); return; }
 
         if (!treeReady || Time.time < nextTreePoke) return;
         foreach (var hit in hits)
@@ -331,24 +358,25 @@ public class GreetingCardController : MonoBehaviour
 
     public void OnGiftOpening() => SetState(State.Opening);
     public void PlayPop() => PlaySfx(popClip);
-    public void ReleaseReward(Vector3 top) => StartCoroutine(RewardRoutine(top));
+    public void ReleaseReward(Vector3 top, bool golden) => StartCoroutine(RewardRoutine(top, golden));
 
-    IEnumerator RewardRoutine(Vector3 top)
+    IEnumerator RewardRoutine(Vector3 top, bool golden)
     {
-        var reward = PickReward();
+        var reward = golden ? PickRare() : PickReward(); // Santa's golden present is always rare
         var go = Instantiate(reward.prefab, content);
         go.SetActive(true);
         spawned.Add(go);
         Transform r = go.transform;
         Vector3 start = content.InverseTransformPoint(top);
         Vector3 end = start + Vector3.up * 0.22f;
-        Vector3 full = r.localScale * (reward.rare ? 1.35f : 1f);
+        Vector3 full = r.localScale * (golden ? 1.6f : reward.rare ? 1.35f : 1f);
         Quaternion facing = r.localRotation;
         r.localPosition = start;
         r.localScale = Vector3.zero;
 
         if (reward.rare) { fx.Rare(top); PlaySfx(rareClip); }
         else PlaySfx(sparkleClip);
+        if (golden) { fx.Firework(top + content.up * 0.3f); fx.Confetti(top); }
 
         // floats up out of the box with an overshoot pop and one full turn
         yield return Ease.Run(0.8f, k =>
@@ -363,9 +391,16 @@ public class GreetingCardController : MonoBehaviour
         ShowLabel(r, reward);
 
         yield return new WaitForSeconds(0.6f);
+        if (golden) { StartCoroutine(FinishSequence()); yield break; }
         giftsOpened++;
-        if (giftsOpened >= giftSpots.Length) StartCoroutine(FinishSequence());
+        if (giftsOpened >= giftSpots.Length) StartCoroutine(BellSequence());
         else SetState(State.GiftsReady);
+    }
+
+    Reward PickRare()
+    {
+        var rare = System.Array.FindAll(rewards, r => r.rare);
+        return rare.Length > 0 ? rare[Random.Range(0, rare.Length)] : PickReward();
     }
 
     Reward PickReward()
@@ -384,8 +419,144 @@ public class GreetingCardController : MonoBehaviour
         label.text.text = reward.rare ? "RARE!\n" + reward.name : reward.name;
         label.text.color = reward.rare ? new Color(1f, 0.84f, 0.3f) : Color.white;
         label.target = target;
+        label.lifetime = reward.rare ? 3.5f : 2.5f; // rare finds stay up a bit longer
         label.gameObject.SetActive(true);
         spawned.Add(label.gameObject);
+    }
+
+    // ---------- Sequence 4: ring the bell, Santa visits with a golden present ----------
+
+    IEnumerator BellSequence()
+    {
+        yield return new WaitForSeconds(0.6f);
+        rings = 0;
+        UpdateSpirit();
+        SetState(State.BellReady);
+        bell.gameObject.SetActive(true);
+        fx.Sparkle(bell.position, 30);
+        PlaySfx(sparkleClip);
+        yield return Ease.Run(0.5f, t => bell.localScale = bellScale * Ease.OutBack(t));
+    }
+
+    // A gentle idle swing, plus a big decaying swing right after each ring.
+    void SwingBell()
+    {
+        float since = Time.time - bellRungAt;
+        float swing = 6f * Mathf.Sin(Time.time * 2f) + (since < 2f ? 35f * Mathf.Exp(-3f * since) * Mathf.Sin(since * 12f) : 0);
+        bell.localRotation = Quaternion.Euler(0, 0, swing);
+    }
+
+    void RingBell()
+    {
+        if (Time.time - bellRungAt < 0.4f) return;
+        bellRungAt = Time.time;
+        rings++;
+        PlaySfx(bellClip ? bellClip : sparkleClip);
+        fx.Sparkle(bell.position, 35);
+        treeLights.Jiggle(0.6f);
+        UpdateSpirit();
+        if (rings >= ringsNeeded) StartCoroutine(SantaVisit());
+        else SetState(State.BellReady); // refreshes "(n/3)"
+    }
+
+    void UpdateSpirit()
+    {
+        for (int i = 0; i < spiritStars.Length; i++)
+            spiritStars[i].color = i < rings ? new Color(1f, 0.82f, 0.25f) : new Color(1, 1, 1, 0.3f);
+        if (rings > 0 && rings <= spiritStars.Length)
+        {
+            var star = spiritStars[rings - 1].transform; // the star that just lit pops
+            StartCoroutine(Ease.Run(0.35f, t => star.localScale = Vector3.one * Mathf.LerpUnclamped(0.6f, 1f, Ease.OutBack(t, 3f))));
+        }
+    }
+
+    IEnumerator SantaVisit()
+    {
+        SetState(State.SantaVisit);
+        if (peek != null) { StopCoroutine(peek); peek = null; }
+
+        // the bell has done its job
+        yield return Ease.Run(0.35f, t => bell.localScale = bellScale * (1 - Ease.InBack(t)));
+        bell.gameObject.SetActive(false);
+
+        // Santa walks in from the edge of the card
+        santa.gameObject.SetActive(true);
+        santa.localScale = santaScale;
+        santa.localPosition = santaEnter.localPosition;
+        santa.localRotation = Quaternion.LookRotation(santaStand.localPosition - santaEnter.localPosition, Vector3.up);
+        fx.Puff(santa.position, 16);
+        PlaySfx(whooshClip, 0.5f);
+        santaAnim.CrossFade("Walk", 0.1f);
+        yield return Ease.Run(2.2f, t =>
+            santa.localPosition = Vector3.Lerp(santaEnter.localPosition, santaStand.localPosition, Ease.InOutSine(t)));
+
+        // turns to you, waves, and talks
+        Quaternion from = santa.localRotation, toCamera = Quaternion.Euler(0, 180, 0);
+        santaAnim.CrossFade("Wave", 0.25f);
+        yield return Ease.Run(0.4f, t => santa.localRotation = Quaternion.Slerp(from, toCamera, Ease.OutCubic(t)));
+        guideText.text = "Ho ho ho!\nSanta has a surprise for you!";
+        yield return new WaitForSeconds(2.2f);
+        santaAnim.CrossFade("Talk", 0.3f);
+        yield return new WaitForSeconds(1.2f);
+
+        // the golden present pops down beside him
+        var gift = Instantiate(goldenGiftTemplate, content);
+        gift.SetActive(true);
+        spawned.Add(gift);
+        gift.GetComponent<GiftBox>().controller = this;
+        Transform g = gift.transform;
+        Vector3 full = g.localScale;
+        g.localPosition = goldenSpot.localPosition;
+        g.localRotation = Quaternion.Euler(0, Random.Range(-15f, 15f), 0);
+        fx.Rare(g.position);
+        PlaySfx(rareClip, 0.8f);
+        yield return Ease.Run(0.5f, t => g.localScale = full * Ease.OutBack(t, 2f));
+        gift.GetComponent<GiftBox>().SetReady();
+        santaAnim.CrossFade("Look", 0.4f);
+        SetState(State.GoldenGift);
+    }
+
+    // ---------- Bonus: lean in close and Santa peeks out ----------
+
+    void CheckLeanIn()
+    {
+        bool allowed = !peekDone && treeReady && !santa.gameObject.activeSelf &&
+                       (Current == State.TreeUp || Current == State.GiftsReady);
+        if (!allowed) { closeSince = -1; return; }
+        Vector3 cam = content.InverseTransformPoint(arCamera.transform.position);
+        bool close = (cam - (tree.localPosition + Vector3.up * 0.6f)).magnitude < leanDistance;
+        if (!close) closeSince = -1;
+        else if (closeSince < 0) closeSince = Time.time;
+        else if (Time.time - closeSince > 0.3f) { peekDone = true; peek = StartCoroutine(SantaPeek()); }
+    }
+
+    IEnumerator SantaPeek()
+    {
+        santa.gameObject.SetActive(true);
+        santa.localScale = santaScale;
+        santa.localPosition = peekHide.localPosition;
+        santa.localRotation = Quaternion.LookRotation(peekShow.localPosition - peekHide.localPosition, Vector3.up);
+        santaAnim.CrossFade("Walk", 0.1f);
+        yield return Ease.Run(0.8f, t => santa.localPosition = Vector3.Lerp(peekHide.localPosition, peekShow.localPosition, Ease.OutCubic(t)));
+
+        Quaternion from = santa.localRotation, toCamera = Quaternion.Euler(0, 180, 0);
+        santaAnim.CrossFade("Wave", 0.2f);
+        PlaySfx(treeTapClip, 0.8f);
+        guideText.text = "Santa spotted you!";
+        yield return Ease.Run(0.3f, t => santa.localRotation = Quaternion.Slerp(from, toCamera, Ease.OutCubic(t)));
+        yield return new WaitForSeconds(1.6f);
+
+        // runs off with a flip and vanishes in a puff of snow
+        Vector3 start = santa.localPosition;
+        santa.localRotation = Quaternion.LookRotation(peekExit.localPosition - start, Vector3.up);
+        santaAnim.CrossFade("Flip", 0.1f);
+        PlaySfx(whooshClip, 0.6f);
+        yield return Ease.Run(1.3f, t => santa.localPosition = Vector3.Lerp(start, peekExit.localPosition, Ease.InQuad(t)));
+        fx.Puff(santa.position, 18);
+        yield return Ease.Run(0.25f, t => santa.localScale = santaScale * (1 - Ease.InBack(t)));
+        santa.gameObject.SetActive(false);
+        SetState(Current); // put the guide text back
+        peek = null;
     }
 
     // ---------- Finale ----------
@@ -397,11 +568,7 @@ public class GreetingCardController : MonoBehaviour
         treeLights.Jiggle(1.5f); // the tree celebrates too
         fx.confettiRain.Play();
         StartCoroutine(FinaleMusic());
-
-        santa.gameObject.SetActive(true);
-        santa.localScale = Vector3.zero;
-        fx.Puff(santa.position, 16);
-        StartCoroutine(Ease.Run(0.5f, t => santa.localScale = santaScale * Ease.OutBack(t)));
+        santaAnim.CrossFade("Dance", 0.3f);
 
         Vector3 sky = tree.localPosition + Vector3.up * 1.1f;
         while (true)
@@ -440,16 +607,22 @@ public class GreetingCardController : MonoBehaviour
         getGiftButton.gameObject.SetActive(s == State.TreeUp || s == State.SantaArriving);
         getGiftButton.interactable = s == State.TreeUp && treeReady;
         finishScreen.SetActive(s == State.Finished);
+        spiritMeter.SetActive(s == State.BellReady);
 
         int left = giftSpots.Length - giftsOpened;
         switch (s)
         {
             case State.Scanned: guideText.text = "Card found! Tap Start to begin"; break;
-            case State.TreeUp: guideText.text = "Watch your Christmas tree grow..."; break;
+            case State.TreeUp:
+                guideText.text = treeReady ? "Tap \"Get Your Gift\" to call Santa!\nTip: poke the tree!" : "Watch your Christmas tree grow...";
+                break;
             case State.SantaArriving: guideText.text = "Here comes Santa!\nListen for the sleigh bells..."; break;
             case State.GiftsReady: guideText.text = $"Tap a gift to open it!  ({left} left)"; break;
             case State.Opening: guideText.text = "What's inside?"; break;
-            case State.Finished: guideText.text = "You opened every gift!"; break;
+            case State.BellReady: guideText.text = $"Ring the bell to call Santa!  ({rings}/{ringsNeeded})"; break;
+            case State.SantaVisit: guideText.text = "Santa is coming!"; break;
+            case State.GoldenGift: guideText.text = "Tap Santa's golden present!"; break;
+            case State.Finished: guideText.text = "Merry Christmas from Santa!"; break;
         }
     }
 
@@ -464,6 +637,13 @@ public class GreetingCardController : MonoBehaviour
         tree.gameObject.SetActive(false);
         sleigh.gameObject.SetActive(false);
         santa.gameObject.SetActive(false);
+        santa.localScale = santaScale;
+        bell.gameObject.SetActive(false);
+        bell.localScale = bellScale;
+        rings = 0;
+        peekDone = false;
+        closeSince = -1;
+        peek = null;
         fx.StopAll();
         music.Stop();
         music.clip = mainMusic;
