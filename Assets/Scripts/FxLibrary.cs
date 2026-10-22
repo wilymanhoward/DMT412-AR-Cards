@@ -9,6 +9,8 @@ public class FxLibrary : MonoBehaviour
     public ParticleSystem glitter;     // gold glitter rising with the tree
     public ParticleSystem snowfall;
     public ParticleSystem trail;       // behind the sleigh
+    public ParticleSystem orbitStars;  // golden stars swirling around the tree once it's up
+    public ParticleSystem confettiRain; // finale
 
     [Header("Bursts (world space)")]
     public ParticleSystem snowPuff;
@@ -45,7 +47,7 @@ public class FxLibrary : MonoBehaviour
 
     public void StopAll()
     {
-        foreach (var ps in new[] { sparkleRing, glitter, snowfall, trail, snowPuff, confetti, sparkle, rareBurst, firework })
+        foreach (var ps in new[] { sparkleRing, glitter, snowfall, trail, orbitStars, confettiRain, snowPuff, confetti, sparkle, rareBurst, firework })
             ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
     }
 
