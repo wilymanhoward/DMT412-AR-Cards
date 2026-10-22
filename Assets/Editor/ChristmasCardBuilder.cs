@@ -22,11 +22,11 @@ public static class ChristmasCardBuilder
 
     // Card is 1 unit wide and 0.71 deep (image target size). Everything below is in card units.
     const float CardHalfW = 0.5f, CardHalfD = 0.354f;
-    const float TreeHeight = 1.5f, GiftHeight = 0.18f, RewardSize = 0.15f, SantaHeight = 0.45f, SleighLength = 1.6f;
+    const float TreeHeight = 1.5f, GiftHeight = 0.18f, RewardSize = 0.15f, SantaHeight = 0.7f, SleighLength = 1.6f;
 
     static readonly Color Red = Hex("C62828"), Green = Hex("1F6B3A"), Gold = Hex("FFC940"), Cream = Hex("FFF8E7");
 
-    static Material sparkleMat, glowMat, softMat, confettiMat;
+    static Material sparkleMat, glowMat, softMat, confettiMat, goldMat;
     static Sprite roundSprite, glowSprite, snowSprite, bulbSprite, cornerSprite, hollySprite, snowCapSprite;
     static Sprite noteSprite, noteOffSprite, restartSprite, giftSprite, starSprite;
     static Font font, titleFont;
@@ -71,9 +71,11 @@ public static class ChristmasCardBuilder
         var fx = BuildFx(content, treeRadius);
         var sleigh = BuildSleigh(content, fx, out var bells);
         var spots = BuildGiftSpots(content, treeRadius);
-        var gifts = BuildGiftTemplates(templates.transform);
+        var gifts = BuildGiftTemplates(templates.transform, out var goldenGift);
         var rewards = BuildRewards(templates.transform);
         var santa = BuildSanta(content);
+        var santaSpots = BuildSantaSpots(content);
+        var bell = BuildBell(content);
         var ui = BuildUI();
 
         // controller lives outside the target so it keeps running when the card is lost
@@ -86,6 +88,14 @@ public static class ChristmasCardBuilder
         c.santa = santa;
         c.giftSpots = spots;
         c.giftTemplates = gifts;
+        c.goldenGiftTemplate = goldenGift;
+        c.bell = bell;
+        c.santaEnter = santaSpots[0];
+        c.santaStand = santaSpots[1];
+        c.goldenSpot = santaSpots[2];
+        c.peekHide = santaSpots[3];
+        c.peekShow = santaSpots[4];
+        c.peekExit = santaSpots[5];
         c.rewards = rewards;
         c.fx = fx;
         c.circleRadius = treeRadius + SleighLength * 0.3f + 0.1f; // keeps the bigger sleigh clear of the branches
@@ -102,6 +112,7 @@ public static class ChristmasCardBuilder
         c.whooshClip = FindClip("whoosh", "swoosh");
         c.treeTapClip = FindClip("boing", "jingle", "tap");
         c.finaleClip = FindClip("finale");
+        c.bellClip = FindClip("ring");
 
         c.uiRoot = ui.root;
         c.startScreen = ui.start;
@@ -115,6 +126,8 @@ public static class ChristmasCardBuilder
         c.soundOnSprite = noteSprite;
         c.soundOffSprite = noteOffSprite;
         c.labelTemplate = ui.labelTemplate;
+        c.spiritMeter = ui.spiritMeter;
+        c.spiritStars = ui.spiritStars;
         ui.labelTemplate.cam = c.arCamera;
 
         // wiring: card found/lost and every button
@@ -468,7 +481,7 @@ public static class ChristmasCardBuilder
         Fade(trail, 0.01f, 0.3f);
         fx.trail = trail;
 
-        bells = NewAudio(sleigh.gameObject, FindClip("bell", "sleigh"), loop: true);
+        bells = NewAudio(sleigh.gameObject, FindClip("sleigh"), loop: true);
         bells.spatialBlend = 1;              // 3D: louder as Santa gets closer to the camera
         bells.rolloffMode = AudioRolloffMode.Linear;
         bells.minDistance = 0.5f;
@@ -510,7 +523,7 @@ public static class ChristmasCardBuilder
         }).ToArray();
     }
 
-    static GameObject[] BuildGiftTemplates(Transform parent)
+    static GameObject[] BuildGiftTemplates(Transform parent, out GameObject golden)
     {
         var kinds = new[]
         {
@@ -519,7 +532,19 @@ public static class ChristmasCardBuilder
             ("Long", "Gift_Christmas_Long_Open", "Gift_Christmas_Long_Open_Lid"),
         };
         float scale = 0; // shared, so all gift kinds keep their real size relative to each other
-        return kinds.Select(k => BuildGift(k.Item1, k.Item2, k.Item3, parent, ref scale)).ToArray();
+        var gifts = kinds.Select(k => BuildGift(k.Item1, k.Item2, k.Item3, parent, ref scale)).ToArray();
+
+        golden = BuildGift("Golden", kinds[0].Item2, kinds[0].Item3, parent, ref scale);
+        foreach (var r in golden.GetComponentsInChildren<Renderer>().Where(r => !(r is ParticleSystemRenderer)))
+            r.sharedMaterials = Enumerable.Repeat(goldMat, r.sharedMaterials.Length).ToArray();
+        var glow = golden.GetComponent<GiftBox>().glow;
+        var em = glow.emission;
+        em.rateOverTime = 22;
+        var main = glow.main;
+        main.maxParticles = 60;
+        main.startSize = Range(0.07f, 0.12f);
+        golden.GetComponent<GiftBox>().golden = true;
+        return gifts;
     }
 
     static GameObject BuildGift(string name, string basePrefab, string lidPrefab, Transform parent, ref float scale)
@@ -603,15 +628,12 @@ public static class ChristmasCardBuilder
         }).ToArray();
     }
 
-    // ---------------------------------------------------------------- finale Santa
+    // ---------------------------------------------------------------- Santa, his spots, the bell
 
     static Transform BuildSanta(Transform content)
     {
-        var santa = Wrap(Ithappy + "Prefabs/Santa.prefab", "Finale Santa", Measure.Height, SantaHeight);
+        var santa = Wrap(Ithappy + "Prefabs/Santa.prefab", "Santa", Measure.Height, SantaHeight);
         santa.SetParent(content, false);
-        santa.localPosition = new Vector3(CardHalfW - 0.1f, 0, -(CardHalfD - 0.1f)); // front-right corner
-        santa.localRotation = Quaternion.Euler(0, 200, 0); // faces the camera, turned slightly toward the tree
-
         var animator = santa.GetComponentInChildren<Animator>();
         if (!animator)
         {
@@ -619,32 +641,81 @@ public static class ChristmasCardBuilder
             animator.avatar = AssetDatabase.LoadAllAssetsAtPath(Ithappy + "Meshes/Santa.fbx").OfType<Avatar>().First();
         }
         animator.runtimeAnimatorController = SantaController();
-        animator.applyRootMotion = false; // dance in place
+        animator.applyRootMotion = false; // the controller moves him; the clips animate in place
         santa.gameObject.SetActive(false);
         return santa;
     }
 
-    // Wave hello, then dance on a loop.
+    // One state per move; the controller cross-fades between them by name.
+    // Clips aren't set to loop, so Look, Walk and Dance restart themselves at the end.
     static AnimatorController SantaController()
     {
-        string path = Gen + "FinaleSanta.controller";
+        string path = Gen + "Santa.controller";
         AssetDatabase.DeleteAsset(path);
+        AssetDatabase.DeleteAsset(Gen + "FinaleSanta.controller"); // old name
         var controller = AnimatorController.CreateAnimatorControllerAtPath(path);
         var sm = controller.layers[0].stateMachine;
-        var wave = sm.AddState("Wave");
-        wave.motion = Load<AnimationClip>(Ithappy + "Animations/Other_Animations/Santa_WaveHello.anim");
-        var dance = sm.AddState("Dance");
-        dance.motion = Load<AnimationClip>(Ithappy + "Animations/Other_Animations/Santa_DanceIdle.anim");
-        sm.defaultState = wave;
-        var toDance = wave.AddTransition(dance);
-        toDance.hasExitTime = true;
-        toDance.exitTime = 0.9f;
-        toDance.duration = 0.25f;
-        var loop = dance.AddTransition(dance); // clips aren't set to loop, so restart at the end
-        loop.hasExitTime = true;
-        loop.exitTime = 0.95f;
-        loop.duration = 0.2f;
+        const string clips = Ithappy + "Animations/Other_Animations/Santa_";
+        AnimatorState State(string name, string clip, bool loop)
+        {
+            var state = sm.AddState(name);
+            state.motion = Load<AnimationClip>(clips + clip + ".anim");
+            if (loop)
+            {
+                var again = state.AddTransition(state);
+                again.hasExitTime = true;
+                again.exitTime = 0.95f;
+                again.duration = 0.15f;
+            }
+            return state;
+        }
+        sm.defaultState = State("Look", "IdleLookAround", true);
+        State("Walk", "WalkWithItem", true);
+        State("Wave", "WaveHello", false);
+        State("Talk", "TalkGestureActive", false);
+        State("Flip", "Running_Forward_Flip", false);
+        State("Dance", "DanceIdle", true);
         return controller;
+    }
+
+    // Where Santa walks in from and stops, where the golden present lands, and the peek path.
+    // Front-right of the card is kept free of gifts for him. Drag the spots in the scene to adjust.
+    static Transform[] BuildSantaSpots(Transform content)
+    {
+        var root = NewChild("Santa Spots", content);
+        var spots = new[]
+        {
+            ("Walk In From", new Vector3(CardHalfW + 0.45f, 0, -0.12f)),   // off the right edge
+            ("Stand", new Vector3(CardHalfW - 0.02f, 0, -0.08f)),  // at the edge: the taller Santa stays clear of the branches
+            ("Golden Present", new Vector3(CardHalfW - 0.17f, 0, -0.27f)),
+            ("Peek Hide", new Vector3(0.15f, 0, 0.32f)),                   // behind the tree
+            ("Peek Show", new Vector3(0.52f, 0, -0.02f)),                  // just right of the tree
+            ("Peek Exit", new Vector3(1.1f, 0, 0.6f)),
+        };
+        return spots.Select(spot =>
+        {
+            var t = NewChild(spot.Item1, root);
+            t.localPosition = spot.Item2;
+            return t;
+        }).ToArray();
+    }
+
+    // A golden hand bell hanging in front of the tree; its pivot is at the top so it swings.
+    static Transform BuildBell(Transform content)
+    {
+        const float size = 0.18f;
+        var hanger = NewChild("Call Bell", content);
+        hanger.localPosition = new Vector3(0.2f, 0.65f, -0.4f);
+        var bell = Wrap(Poly + "Bell_A_Christmas.prefab", "Bell", Measure.Height, size);
+        bell.SetParent(hanger, false);
+        bell.localPosition = new Vector3(0, -size, 0);
+        foreach (var r in bell.GetComponentsInChildren<Renderer>())
+            r.sharedMaterials = Enumerable.Repeat(goldMat, r.sharedMaterials.Length).ToArray();
+        var col = bell.gameObject.AddComponent<SphereCollider>(); // generous tap target
+        col.center = new Vector3(0, size / 2, 0);
+        col.radius = size * 0.9f;
+        hanger.gameObject.SetActive(false);
+        return hanger;
     }
 
     // ---------------------------------------------------------------- UI
@@ -656,6 +727,8 @@ public static class ChristmasCardBuilder
         public Text guideText, soundLabel;
         public Image soundIcon;
         public RewardLabel labelTemplate;
+        public GameObject spiritMeter;
+        public Image[] spiritStars;
     }
 
     static readonly Color[] BulbColours = { Hex("FF3B3B"), Hex("FFC940"), Hex("3DDC6B"), Hex("4FC3F7"), Color.white };
@@ -676,17 +749,18 @@ public static class ChristmasCardBuilder
 
         // reward name tags: a rounded tag that follows each reward (behind every screen)
         var labels = Stretch("Reward Labels", root);
-        var tag = Panel("Reward Tag", labels, centre, Vector2.zero, new Vector2(440, 110), new Color(0.07f, 0.3f, 0.16f, 0.92f));
+        var tag = Panel("Reward Tag", labels, centre, Vector2.zero, new Vector2(340, 84), new Color(0.07f, 0.3f, 0.16f, 0.92f));
         tag.raycastTarget = false;
         tag.gameObject.AddComponent<CanvasGroup>().blocksRaycasts = false;
         ui.labelTemplate = tag.gameObject.AddComponent<RewardLabel>();
-        ui.labelTemplate.text = Label("Reward", tag.transform, 42, Color.white, centre, Vector2.zero, new Vector2(420, 110), Hex("0A2A14"));
+        ui.labelTemplate.text = Label("Reward", tag.transform, 32, Color.white, centre, Vector2.zero, new Vector2(320, 84), Hex("0A2A14"));
         tag.gameObject.AddComponent<UIPopIn>();
         tag.gameObject.SetActive(false);
 
         // always on: a string of twinkling Christmas lights and the guide banner
         ChristmasLights(root);
         var guide = Panel("Guide Banner", root, top, new Vector2(0, -160), new Vector2(900, 124), Green);
+        SlideIn(guide, new Vector2(0, 400), 0.25f);
         SnowCap(guide.transform, 900);
         Holly(guide.transform, new Vector2(-425, 48), 96, -15);
         Holly(guide.transform, new Vector2(425, 48), 96, 15);
@@ -695,12 +769,26 @@ public static class ChristmasCardBuilder
         // Scanned: Start
         ui.start = Stretch("Start Screen", root).gameObject;
         ui.startButton = BigButton("Start", starSprite, ui.start.transform, bottom, new Vector2(0, 120), new Vector2(520, 160), Red, 58, out _);
+        SlideIn(ui.startButton, new Vector2(0, -500), 0.45f);
 
         // HUD: Restart (left), Get Your Gift (centre), Music (right)
         ui.hud = Stretch("HUD", root).gameObject;
         ui.restartButton = SmallButton("Restart", restartSprite, ui.hud.transform, new Vector2(0, 0), new Vector2(125, 120), out _, out _);
         ui.soundButton = SmallButton("Music", noteSprite, ui.hud.transform, new Vector2(1, 0), new Vector2(-125, 120), out ui.soundLabel, out ui.soundIcon);
         ui.giftButton = BigButton("Get Your Gift", giftSprite, ui.hud.transform, bottom, new Vector2(0, 120), new Vector2(520, 160), Red, 48, out _);
+        SlideIn(ui.giftButton, new Vector2(0, -500), 0.2f);
+        SlideIn(ui.restartButton, new Vector2(-400, 0), 0.3f);
+        SlideIn(ui.soundButton, new Vector2(400, 0), 0.3f);
+
+        // "Christmas spirit" meter: one star lights per bell ring
+        var meter = Panel("Spirit Meter", ui.hud.transform, bottom, new Vector2(0, 120), new Vector2(520, 160), Green);
+        SnowCap(meter.transform, 520);
+        ui.spiritStars = Enumerable.Range(0, 3).Select(i =>
+            Icon(meter.transform, starSprite, new Vector2((i - 1) * 130, -6), 100)).ToArray();
+        foreach (var star in ui.spiritStars) star.color = new Color(1, 1, 1, 0.3f);
+        SlideIn(meter, new Vector2(0, -500), 0.1f);
+        ui.spiritMeter = meter.gameObject;
+        ui.spiritMeter.SetActive(false);
 
         // Finished: Merry Christmas + Play Again
         ui.finish = Stretch("Finish Screen", root).gameObject;
@@ -711,6 +799,24 @@ public static class ChristmasCardBuilder
         Deco(ui.finish.transform, top, new Vector2(-470, -330), 80, 25, 0.95f);
         Deco(ui.finish.transform, top, new Vector2(470, -330), 80, -25, 0.95f);
         ui.againButton = BigButton("Play Again", restartSprite, ui.finish.transform, bottom, new Vector2(0, 120), new Vector2(520, 160), Red, 54, out _);
+        SlideIn(ui.againButton, new Vector2(0, -500), 0.8f);
+
+        // entrance burst over everything except the lost screen
+        var burst = Stretch("Reveal Burst", root);
+        var flash = burst.gameObject.AddComponent<Image>();
+        flash.color = new Color(1f, 0.92f, 0.7f, 0);
+        flash.raycastTarget = false;
+        var reveal = burst.gameObject.AddComponent<RevealBurst>();
+        reveal.flash = flash;
+        reveal.pieces = Enumerable.Range(0, 18).Select(i =>
+        {
+            var piece = Rect("Piece", burst, centre, Vector2.zero, new Vector2(90, 90)).gameObject.AddComponent<Image>();
+            piece.sprite = i % 2 == 0 ? snowSprite : starSprite;
+            piece.color = i % 3 == 0 ? Gold : Color.white;
+            piece.raycastTarget = false;
+            piece.gameObject.SetActive(false);
+            return piece;
+        }).ToArray();
 
         // Lost tracking: blocks taps and explains what to do (drawn on top of everything)
         ui.lost = Stretch("Lost Screen", root).gameObject;
@@ -781,6 +887,7 @@ public static class ChristmasCardBuilder
     static void ChristmasLights(Transform root)
     {
         var strip = Rect("Christmas Lights", root, new Vector2(0.5f, 1), Vector2.zero, Vector2.zero);
+        SlideIn(strip, new Vector2(0, 220), 0.1f);
         System.Func<float, Vector2> wire = u => new Vector2(Mathf.Lerp(-960, 960, u), -18 - 28 * Mathf.Abs(Mathf.Sin(Mathf.PI * 5 * u)));
         const int segments = 100, bulbs = 21;
         for (int i = 0; i < segments; i++)
@@ -865,6 +972,13 @@ public static class ChristmasCardBuilder
         iconImage = Icon(face.transform, icon, new Vector2(0, 14), 64);
         label = Label(text, face.transform, 28, Color.white, new Vector2(0.5f, 0.5f), new Vector2(0, -46), new Vector2(size.x, 44), Hex("0A2A14"));
         return MakeButton(face.gameObject, face);
+    }
+
+    static void SlideIn(Component element, Vector2 from, float delay)
+    {
+        var slide = element.gameObject.AddComponent<UISlideIn>();
+        slide.from = from;
+        slide.delay = delay;
     }
 
     static Image Icon(Transform parent, Sprite sprite, Vector2 pos, float size)
@@ -980,6 +1094,12 @@ public static class ChristmasCardBuilder
         glowMat = MakeMaterial("FX_Glow", additive, glow);
         softMat = MakeMaterial("FX_Soft", blended, glow);
         confettiMat = MakeMaterial("FX_Confetti", blended, Load<Texture2D>(round));
+        goldMat = MakeMaterial("Gold", "Standard", null);
+        goldMat.color = new Color(1f, 0.78f, 0.25f);
+        goldMat.SetFloat("_Metallic", 0.6f);
+        goldMat.SetFloat("_Glossiness", 0.75f);
+        goldMat.EnableKeyword("_EMISSION");
+        goldMat.SetColor("_EmissionColor", new Color(1f, 0.65f, 0.15f) * 0.5f);
         AssetDatabase.SaveAssets();
     }
 
