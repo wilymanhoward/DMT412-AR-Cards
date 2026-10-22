@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using Vuforia;
+using Image = UnityEngine.UI.Image; // Vuforia also has an Image type
 
 // Runs the Christmas card as a state machine:
 //   Idle → Scanned → TreeUp → SantaArriving → GiftsReady ⇄ Opening → Finished
@@ -50,13 +51,17 @@ public class GreetingCardController : MonoBehaviour
     public AudioSource bells;      // 3D, on the sleigh: louder as it approaches
     public AudioSource sfx;
     public AudioClip popClip, landClip, sparkleClip, rareClip, fireworksClip, whooshClip, treeTapClip;
+    public AudioClip finaleClip;   // plays once when every gift is open, then the main music returns
     [Range(0, 1)] public float musicVolume = 0.6f;
 
     [Header("UI")]
-    public GameObject scanScreen, startScreen, hud, lostScreen, finishScreen, tapHint;
+    public GameObject scanScreen, startScreen, hud, lostScreen, finishScreen;
+    public Text guideText;         // one line telling the player what to do next
     public Button getGiftButton;
     public Text soundLabel;
-    public Text labelTemplate;
+    public Image soundIcon;
+    public Sprite soundOnSprite, soundOffSprite;
+    public RewardLabel labelTemplate;
 
     public State Current { get; private set; } = State.Idle;
 
@@ -68,6 +73,7 @@ public class GreetingCardController : MonoBehaviour
     Vector3 santaScale;
     Vector3 sleighPrev, sleighForward = Vector3.forward;
     float sleighRoll;
+    AudioClip mainMusic;
     ObserverBehaviour cardTarget;
     bool cardVisible;
     float notTrackedSince = -1;
@@ -77,6 +83,7 @@ public class GreetingCardController : MonoBehaviour
         Application.targetFrameRate = 60;
         treeRotation = tree.localRotation;
         santaScale = santa.localScale;
+        mainMusic = music.clip;
         cardTarget = content.GetComponentInParent<ObserverBehaviour>(); // the image target the card content lives under
         cardTarget.OnTargetStatusChanged += OnCardStatus;
         ResetScene();
@@ -135,7 +142,8 @@ public class GreetingCardController : MonoBehaviour
     {
         muted = !muted;
         AudioListener.volume = muted ? 0 : 1;
-        soundLabel.text = muted ? "Sound: Off" : "Sound: On";
+        soundLabel.text = muted ? "Muted" : "Music";
+        soundIcon.sprite = muted ? soundOffSprite : soundOnSprite;
     }
 
     public void Restart()
@@ -170,11 +178,17 @@ public class GreetingCardController : MonoBehaviour
         fx.sparkleRing.Stop();
         PuffRing(0.3f, 8);
 
+        // "lights on!": a golden burst at the star, then the tree comes alive
+        fx.Rare(treeLights.star.position);
+        PlaySfx(rareClip, 0.7f);
         treeLights.enabled = true;
+        treeLights.Jiggle(0.6f);
         fx.snowfall.Play();
+        fx.orbitStars.Play();
         StartCoroutine(FadeAudio(music, 0, musicVolume, 2.5f, true));
         treeReady = true;
         getGiftButton.interactable = true;
+        guideText.text = "Tap \"Get Your Gift\" to call Santa!\nTip: poke the tree!";
     }
 
     // ---------- Sequence 2: Santa flies in, circles, drops gifts, flies off ----------
@@ -391,9 +405,9 @@ public class GreetingCardController : MonoBehaviour
     void ShowLabel(Transform target, Reward reward)
     {
         var label = Instantiate(labelTemplate, labelTemplate.transform.parent);
-        label.text = reward.rare ? "RARE!\n" + reward.name : reward.name;
-        label.color = reward.rare ? new Color(1f, 0.84f, 0.3f) : Color.white;
-        label.GetComponent<RewardLabel>().target = target;
+        label.text.text = reward.rare ? "RARE!\n" + reward.name : reward.name;
+        label.text.color = reward.rare ? new Color(1f, 0.84f, 0.3f) : Color.white;
+        label.target = target;
         label.gameObject.SetActive(true);
         spawned.Add(label.gameObject);
     }
@@ -405,6 +419,8 @@ public class GreetingCardController : MonoBehaviour
         yield return new WaitForSeconds(0.8f);
         SetState(State.Finished);
         treeLights.Jiggle(1.5f); // the tree celebrates too
+        fx.confettiRain.Play();
+        StartCoroutine(FinaleMusic());
 
         santa.gameObject.SetActive(true);
         santa.localScale = Vector3.zero;
@@ -421,6 +437,23 @@ public class GreetingCardController : MonoBehaviour
         }
     }
 
+    // Fade the carol out, play the finale tune once, then bring the carol back.
+    IEnumerator FinaleMusic()
+    {
+        yield return FadeAudio(music, music.volume, 0, 0.6f, false);
+        if (finaleClip)
+        {
+            music.clip = finaleClip;
+            music.loop = false;
+            music.volume = musicVolume;
+            music.Play();
+            yield return new WaitForSeconds(finaleClip.length);
+        }
+        music.clip = mainMusic;
+        music.loop = true;
+        yield return FadeAudio(music, 0, musicVolume, 2f, true);
+    }
+
     // ---------- Helpers ----------
 
     void SetState(State s)
@@ -431,8 +464,19 @@ public class GreetingCardController : MonoBehaviour
         hud.SetActive(s >= State.TreeUp);
         getGiftButton.gameObject.SetActive(s == State.TreeUp || s == State.SantaArriving);
         getGiftButton.interactable = s == State.TreeUp && treeReady;
-        tapHint.SetActive(s == State.GiftsReady);
         finishScreen.SetActive(s == State.Finished);
+
+        int left = giftSpots.Length - giftsOpened;
+        switch (s)
+        {
+            case State.Idle: guideText.text = "Point your camera at your Christmas card"; break;
+            case State.Scanned: guideText.text = "Card found! Tap Start to begin"; break;
+            case State.TreeUp: guideText.text = "Watch your Christmas tree grow..."; break;
+            case State.SantaArriving: guideText.text = "Here comes Santa!\nListen for the sleigh bells..."; break;
+            case State.GiftsReady: guideText.text = $"Tap a gift to open it!  ({left} left)"; break;
+            case State.Opening: guideText.text = "What's inside?"; break;
+            case State.Finished: guideText.text = "You opened every gift!"; break;
+        }
     }
 
     void ResetScene()
@@ -448,6 +492,8 @@ public class GreetingCardController : MonoBehaviour
         santa.gameObject.SetActive(false);
         fx.StopAll();
         music.Stop();
+        music.clip = mainMusic;
+        music.loop = true;
         bells.Stop();
     }
 

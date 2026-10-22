@@ -27,8 +27,9 @@ public static class ChristmasCardBuilder
     static readonly Color Red = Hex("C62828"), Green = Hex("1F6B3A"), Gold = Hex("FFC940"), Cream = Hex("FFF8E7");
 
     static Material sparkleMat, glowMat, softMat, confettiMat;
-    static Sprite roundSprite, glowSprite, snowSprite;
-    static Font font;
+    static Sprite roundSprite, glowSprite, snowSprite, bulbSprite, cornerSprite, hollySprite, snowCapSprite;
+    static Sprite noteSprite, noteOffSprite, restartSprite, giftSprite, starSprite;
+    static Font font, titleFont;
 
     // ---------------------------------------------------------------- 1. pink fix
 
@@ -100,17 +101,21 @@ public static class ChristmasCardBuilder
         c.fireworksClip = FindClip("firework");
         c.whooshClip = FindClip("whoosh", "swoosh");
         c.treeTapClip = FindClip("boing", "jingle", "tap");
+        c.finaleClip = FindClip("finale");
 
         c.scanScreen = ui.scan;
         c.startScreen = ui.start;
         c.hud = ui.hud;
         c.lostScreen = ui.lost;
         c.finishScreen = ui.finish;
-        c.tapHint = ui.tapHint;
+        c.guideText = ui.guideText;
         c.getGiftButton = ui.giftButton;
         c.soundLabel = ui.soundLabel;
+        c.soundIcon = ui.soundIcon;
+        c.soundOnSprite = noteSprite;
+        c.soundOffSprite = noteOffSprite;
         c.labelTemplate = ui.labelTemplate;
-        ui.labelTemplate.GetComponent<RewardLabel>().cam = c.arCamera;
+        ui.labelTemplate.cam = c.arCamera;
 
         // wiring: card found/lost and every button
         var handler = target.GetComponent<DefaultObserverEventHandler>();
@@ -134,8 +139,8 @@ public static class ChristmasCardBuilder
         Selection.activeGameObject = content.gameObject;
         Debug.Log($"GREETING_CARD_BUILT tree footprint radius {treeRadius:F2}, flight radius {c.circleRadius:F2}, " +
                   $"clips: music={(bool)c.music.clip} bells={(bool)bells.clip} pop={(bool)c.popClip} land={(bool)c.landClip} " +
-                  $"sparkle={(bool)c.sparkleClip} rare={(bool)c.rareClip} fireworks={(bool)c.fireworksClip} whoosh={(bool)c.whooshClip}, " +
-                  $"font={font.name}");
+                  $"sparkle={(bool)c.sparkleClip} rare={(bool)c.rareClip} fireworks={(bool)c.fireworksClip} whoosh={(bool)c.whooshClip} " +
+                  $"treeTap={(bool)c.treeTapClip} finale={(bool)c.finaleClip}, font={font.name}, title={titleFont.name}");
     }
 
     static void Cleanup(Transform target)
@@ -374,6 +379,59 @@ public static class ChristmasCardBuilder
         Fade(firework, 0.01f, 0.6f);
         fx.firework = firework;
 
+        // golden stars swirling up around the tree once it's lit
+        var orbit = NewPS("Orbit Stars", root, sparkleMat, local: true);
+        main = orbit.main;
+        main.startLifetime = Range(3f, 4f);
+        main.startSpeed = 0;
+        main.startSize = Range(0.02f, 0.04f);
+        main.startRotation = Range(0, Mathf.PI * 2);
+        main.startColor = Colors(Gold, Color.white, Hex("FFE08A"));
+        main.maxParticles = 80;
+        em = orbit.emission;
+        em.rateOverTime = 18;
+        sh = orbit.shape;
+        sh.shapeType = ParticleSystemShapeType.Circle;
+        sh.radius = treeRadius + 0.15f;
+        sh.radiusThickness = 0;
+        sh.rotation = new Vector3(90, 0, 0);
+        vel = orbit.velocityOverLifetime;
+        vel.enabled = true;
+        vel.space = ParticleSystemSimulationSpace.Local;
+        vel.x = Range(0, 0);
+        vel.y = Range(0.05f, 0.3f);
+        vel.z = Range(0, 0);
+        vel.orbitalY = 1.2f; // radians per second around the tree
+        SizeCurve(orbit, 0, 0, 0.2f, 1, 0.8f, 1, 1, 0);
+        fx.orbitStars = orbit;
+
+        // finale: confetti raining down over the whole card
+        var rain = NewPS("Confetti Rain", root, confettiMat, local: true);
+        rain.transform.localPosition = new Vector3(0, TreeHeight + 0.4f, 0);
+        main = rain.main;
+        main.startLifetime = 3.5f;
+        main.startSpeed = Range(0.1f, 0.25f);
+        main.startSize = Range(0.015f, 0.025f);
+        main.startRotation = Range(0, Mathf.PI * 2);
+        main.startColor = Colors(Red, Hex("2E9E4F"), Gold, Color.white);
+        main.gravityModifier = 0.05f;
+        main.maxParticles = 300;
+        em = rain.emission;
+        em.rateOverTime = 70;
+        sh = rain.shape;
+        sh.shapeType = ParticleSystemShapeType.Box;
+        sh.rotation = new Vector3(90, 0, 0);
+        sh.scale = new Vector3(1.3f, 0.9f, 0.01f);
+        spin = rain.rotationOverLifetime;
+        spin.enabled = true;
+        spin.z = Range(-8f, 8f);
+        noise = rain.noise;
+        noise.enabled = true;
+        noise.strength = 0.1f;
+        noise.frequency = 0.8f;
+        Fade(rain, 0.05f, 0.85f);
+        fx.confettiRain = rain;
+
         return fx;
     }
 
@@ -587,17 +645,24 @@ public static class ChristmasCardBuilder
 
     class Ui
     {
-        public GameObject scan, start, hud, lost, finish, tapHint;
+        public GameObject scan, start, hud, lost, finish;
         public Button startButton, giftButton, soundButton, restartButton, againButton;
-        public Text soundLabel, labelTemplate;
+        public Text guideText, soundLabel;
+        public Image soundIcon;
+        public RewardLabel labelTemplate;
     }
+
+    static readonly Color[] BulbColours = { Hex("FF3B3B"), Hex("FFC940"), Hex("3DDC6B"), Hex("4FC3F7"), Color.white };
 
     static Ui BuildUI()
     {
-        var fontPath = Directory.Exists("Assets/Fonts")
-            ? Directory.GetFiles("Assets/Fonts").FirstOrDefault(f => f.EndsWith(".ttf") || f.EndsWith(".otf"))
-            : null;
-        font = fontPath != null ? Load<Font>(fontPath.Replace('\\', '/')) : Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        var fonts = Directory.Exists("Assets/Fonts")
+            ? Directory.GetFiles("Assets/Fonts").Where(f => f.EndsWith(".ttf") || f.EndsWith(".otf")).Select(f => f.Replace('\\', '/')).ToArray()
+            : new string[0];
+        var bodyPath = fonts.FirstOrDefault(f => f.Contains("Fredoka")) ?? fonts.FirstOrDefault(f => !f.Contains("Christmas"));
+        var titlePath = fonts.FirstOrDefault(f => f.Contains("Christmas"));
+        font = bodyPath != null ? Load<Font>(bodyPath) : Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        titleFont = titlePath != null ? Load<Font>(titlePath) : font;
 
         var canvasGo = new GameObject("Greeting UI", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         var canvas = canvasGo.GetComponent<Canvas>();
@@ -607,54 +672,80 @@ public static class ChristmasCardBuilder
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1080, 1920);
         scaler.matchWidthOrHeight = 0.5f;
+        canvasGo.AddComponent<CanvasOrientation>(); // portrait on the phone, landscape in the editor
         var root = canvasGo.transform;
         var ui = new Ui();
         Vector2 top = new Vector2(0.5f, 1), bottom = new Vector2(0.5f, 0), centre = new Vector2(0.5f, 0.5f);
 
-        // reward name tags (behind every screen)
+        // reward name tags: a rounded tag that follows each reward (behind every screen)
         var labels = Stretch("Reward Labels", root);
-        ui.labelTemplate = Label("Reward", labels, 46, Color.white, centre, Vector2.zero, new Vector2(600, 140), Hex("3A0A0A"));
-        ui.labelTemplate.gameObject.AddComponent<RewardLabel>();
-        ui.labelTemplate.gameObject.AddComponent<UIPopIn>();
-        ui.labelTemplate.gameObject.SetActive(false);
+        var tag = Panel("Reward Tag", labels, centre, Vector2.zero, new Vector2(440, 110), new Color(0.07f, 0.3f, 0.16f, 0.92f));
+        tag.raycastTarget = false;
+        tag.gameObject.AddComponent<CanvasGroup>().blocksRaycasts = false;
+        ui.labelTemplate = tag.gameObject.AddComponent<RewardLabel>();
+        ui.labelTemplate.text = Label("Reward", tag.transform, 42, Color.white, centre, Vector2.zero, new Vector2(420, 110), Hex("0A2A14"));
+        tag.gameObject.AddComponent<UIPopIn>();
+        tag.gameObject.SetActive(false);
 
-        // Idle: scan prompt
+        // always on: a string of twinkling Christmas lights and the guide banner
+        ChristmasLights(root);
+        var guide = Panel("Guide Banner", root, top, new Vector2(0, -160), new Vector2(900, 124), Green);
+        SnowCap(guide.transform, 900);
+        Holly(guide.transform, new Vector2(-425, 48), 96, -15);
+        Holly(guide.transform, new Vector2(425, 48), 96, 15);
+        ui.guideText = Label("Point your camera at your Christmas card", guide.transform, 36, Color.white, centre, new Vector2(0, -4), new Vector2(780, 116), Hex("0A2A14"));
+
+        // Idle: a frame showing where to aim
         ui.scan = Stretch("Scan Screen", root).gameObject;
-        Banner(ui.scan.transform, "Point your camera at the card", Green, Color.white);
-        var bigFlake = Deco(ui.scan.transform, centre, new Vector2(0, 60), 320, 20, 0.55f);
+        var frame = Rect("Scan Frame", ui.scan.transform, centre, new Vector2(0, 40), new Vector2(760, 540));
+        var framePulse = frame.gameObject.AddComponent<UIPulse>();
+        framePulse.scaleAmount = 0.03f;
+        framePulse.speed = 2.5f;
+        for (int i = 0; i < 4; i++)
+        {
+            var corner = Rect("Corner", frame, new Vector2(i % 2, i / 2), Vector2.zero, new Vector2(120, 120)).gameObject.AddComponent<Image>();
+            corner.sprite = cornerSprite;
+            corner.color = new Color(1, 1, 1, 0.95f);
+            corner.raycastTarget = false;
+            // sprite is the top-left corner; rotate it into each corner of the frame
+            corner.rectTransform.localEulerAngles = new Vector3(0, 0, new[] { 90f, 180f, 0f, 270f }[i]);
+            corner.rectTransform.anchoredPosition = new Vector2(i % 2 == 0 ? 50 : -50, i / 2 == 0 ? 50 : -50);
+        }
+        var bigFlake = Deco(frame, centre, Vector2.zero, 260, 15, 0.35f);
         bigFlake.GetComponent<UIPulse>().alphaAmount = 0.5f;
-        Label("Looking for your Christmas card...", ui.scan.transform, 40, Cream, centre, new Vector2(0, -170), new Vector2(1000, 80), Hex("102A1A"));
+        Label("Fit the whole card inside the frame", ui.scan.transform, 40, Cream, centre, new Vector2(0, -300), new Vector2(1000, 80), Hex("102A1A"));
 
         // Scanned: Start
         ui.start = Stretch("Start Screen", root).gameObject;
-        Banner(ui.start.transform, "Card found!", Green, Gold);
-        ui.startButton = BigButton("Start", ui.start.transform, bottom, new Vector2(0, 330), new Vector2(640, 200), Red, 72, out _);
+        ui.startButton = BigButton("Start", starSprite, ui.start.transform, bottom, new Vector2(0, 120), new Vector2(520, 160), Red, 58, out _);
 
-        // HUD: Get Your Gift, sound, restart, tap hint
+        // HUD: Restart (left), Get Your Gift (centre), Music (right)
         ui.hud = Stretch("HUD", root).gameObject;
-        ui.restartButton = SmallButton("Restart", ui.hud.transform, new Vector2(0, 0), new Vector2(190, 140), out _);
-        ui.soundButton = SmallButton("Sound: On", ui.hud.transform, new Vector2(1, 0), new Vector2(-190, 140), out ui.soundLabel);
-        ui.giftButton = BigButton("Get Your Gift", ui.hud.transform, bottom, new Vector2(0, 330), new Vector2(640, 190), Red, 62, out _);
-        ui.tapHint = Banner(ui.hud.transform, "Tap a gift to open it!", Red, Color.white);
+        ui.restartButton = SmallButton("Restart", restartSprite, ui.hud.transform, new Vector2(0, 0), new Vector2(125, 120), out _, out _);
+        ui.soundButton = SmallButton("Music", noteSprite, ui.hud.transform, new Vector2(1, 0), new Vector2(-125, 120), out ui.soundLabel, out ui.soundIcon);
+        ui.giftButton = BigButton("Get Your Gift", giftSprite, ui.hud.transform, bottom, new Vector2(0, 120), new Vector2(520, 160), Red, 48, out _);
 
         // Finished: Merry Christmas + Play Again
         ui.finish = Stretch("Finish Screen", root).gameObject;
-        var title = Label("Merry Christmas!", ui.finish.transform, 124, Gold, top, new Vector2(0, -330), new Vector2(1060, 220), Red);
+        var title = Label("Merry Christmas!", ui.finish.transform, 120, Gold, top, new Vector2(0, -330), new Vector2(1080, 180), Red, titleFont);
         title.GetComponent<Outline>().effectDistance = new Vector2(6, -6);
         title.gameObject.AddComponent<Shadow>().effectDistance = new Vector2(0, -10);
         title.gameObject.AddComponent<UIPopIn>().from = 0.4f;
-        Deco(ui.finish.transform, top, new Vector2(-430, -190), 110, 25, 0.95f);
-        Deco(ui.finish.transform, top, new Vector2(430, -190), 110, -25, 0.95f);
-        Deco(ui.finish.transform, top, new Vector2(0, -480), 80, 30, 0.9f);
-        ui.againButton = BigButton("Play Again", ui.finish.transform, bottom, new Vector2(0, 330), new Vector2(640, 200), Red, 66, out _);
+        Deco(ui.finish.transform, top, new Vector2(-470, -330), 80, 25, 0.95f);
+        Deco(ui.finish.transform, top, new Vector2(470, -330), 80, -25, 0.95f);
+        ui.againButton = BigButton("Play Again", restartSprite, ui.finish.transform, bottom, new Vector2(0, 120), new Vector2(520, 160), Red, 54, out _);
 
         // Lost tracking: blocks taps and explains what to do (drawn on top of everything)
         ui.lost = Stretch("Lost Screen", root).gameObject;
         ui.lost.AddComponent<Image>().color = new Color(0.04f, 0.08f, 0.15f, 0.55f);
-        var lostPanel = Panel("Panel", ui.lost.transform, centre, Vector2.zero, new Vector2(820, 300), Red);
+        var lostPanel = Panel("Panel", ui.lost.transform, centre, Vector2.zero, new Vector2(880, 380), Red);
         lostPanel.gameObject.AddComponent<UIPopIn>();
-        Label("Find the card again", lostPanel.transform, 58, Color.white, centre, Vector2.zero, new Vector2(820, 300), Hex("5A0A0A"));
-        Deco(lostPanel.transform, centre, new Vector2(0, 220), 150, 40, 0.95f);
+        SnowCap(lostPanel.transform, 880);
+        Holly(lostPanel.transform, new Vector2(-405, 160), 130, -15);
+        Holly(lostPanel.transform, new Vector2(405, 160), 130, 15);
+        Label("Find the card again", lostPanel.transform, 60, Color.white, centre, new Vector2(0, 40), new Vector2(820, 100), Hex("5A0A0A"));
+        Label("Point your camera back at your card", lostPanel.transform, 36, Cream, centre, new Vector2(0, -60), new Vector2(820, 80), Hex("5A0A0A"));
+        Deco(lostPanel.transform, centre, new Vector2(0, 280), 150, 40, 0.95f);
 
         foreach (var screen in new[] { ui.start, ui.hud, ui.finish, ui.lost }) screen.SetActive(false);
 
@@ -663,21 +754,69 @@ public static class ChristmasCardBuilder
         return ui;
     }
 
-    static GameObject Banner(Transform parent, string text, Color colour, Color textColour)
+    // A wire draped in three swags across the top of the screen, with coloured bulbs that twinkle out of sync.
+    static void ChristmasLights(Transform root)
     {
-        var panel = Panel(text + " Banner", parent, new Vector2(0.5f, 1), new Vector2(0, -170), new Vector2(940, 190), colour);
-        panel.gameObject.AddComponent<UIPopIn>();
-        Label(text, panel.transform, 52, textColour, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(760, 190), Hex("102A1A"));
-        Deco(panel.transform, new Vector2(0.5f, 0.5f), new Vector2(-410, 0), 80, 30, 0.95f);
-        Deco(panel.transform, new Vector2(0.5f, 0.5f), new Vector2(410, 0), 80, -30, 0.95f);
-        return panel.gameObject;
+        var strip = Rect("Christmas Lights", root, new Vector2(0.5f, 1), Vector2.zero, Vector2.zero);
+        System.Func<float, Vector2> wire = u => new Vector2(Mathf.Lerp(-960, 960, u), -18 - 28 * Mathf.Abs(Mathf.Sin(Mathf.PI * 5 * u)));
+        const int segments = 100, bulbs = 21;
+        for (int i = 0; i < segments; i++)
+        {
+            Vector2 a = wire(i / (float)segments), b = wire((i + 1) / (float)segments);
+            var seg = Rect("Wire", strip, new Vector2(0.5f, 0.5f), (a + b) / 2, new Vector2((b - a).magnitude + 1, 5)).gameObject.AddComponent<Image>();
+            seg.color = Hex("1B3A24");
+            seg.raycastTarget = false;
+            seg.rectTransform.localEulerAngles = new Vector3(0, 0, Mathf.Atan2(b.y - a.y, b.x - a.x) * Mathf.Rad2Deg);
+        }
+        var rng = new System.Random(3);
+        for (int k = 0; k < bulbs; k++)
+        {
+            Vector2 p = wire((k + 0.5f) / bulbs) + new Vector2(0, -20);
+            var colour = BulbColours[k % BulbColours.Length];
+            var halo = Rect("Bulb Glow", strip, new Vector2(0.5f, 0.5f), p, new Vector2(80, 80)).gameObject.AddComponent<Image>();
+            halo.sprite = glowSprite;
+            halo.color = new Color(colour.r, colour.g, colour.b, 0.75f);
+            halo.raycastTarget = false;
+            var twinkle = halo.gameObject.AddComponent<UIPulse>();
+            twinkle.alphaAmount = 0.8f;
+            twinkle.scaleAmount = 0.1f;
+            twinkle.speed = 2.5f + (float)rng.NextDouble() * 2f;
+            twinkle.phase = (float)rng.NextDouble() * 6.28f;
+            var bulb = Rect("Bulb", strip, new Vector2(0.5f, 0.5f), p, new Vector2(30, 40)).gameObject.AddComponent<Image>();
+            bulb.sprite = bulbSprite;
+            bulb.color = colour;
+            bulb.raycastTarget = false;
+            var cap = Rect("Cap", strip, new Vector2(0.5f, 0.5f), p + new Vector2(0, 21), new Vector2(14, 11)).gameObject.AddComponent<Image>();
+            cap.sprite = roundSprite;
+            cap.type = Image.Type.Sliced;
+            cap.color = Hex("B8892E");
+            cap.raycastTarget = false;
+        }
     }
 
-    // Big festive button: soft gold glow behind a red rounded face with a gold rim and snowflakes.
-    static Button BigButton(string text, Transform parent, Vector2 anchor, Vector2 pos, Vector2 size, Color colour, int fontSize, out Text label)
+    // Wavy snow resting on the top edge of a panel or button.
+    static void SnowCap(Transform parent, float width)
+    {
+        var cap = Rect("Snow Cap", parent, new Vector2(0.5f, 1), new Vector2(0, -6), new Vector2(width + 16, 46)).gameObject.AddComponent<Image>();
+        cap.sprite = snowCapSprite;
+        cap.type = Image.Type.Tiled;
+        cap.raycastTarget = false;
+    }
+
+    static void Holly(Transform parent, Vector2 pos, float size, float tilt)
+    {
+        var holly = Rect("Holly", parent, new Vector2(0.5f, 0.5f), pos, new Vector2(size, size)).gameObject.AddComponent<Image>();
+        holly.sprite = hollySprite;
+        holly.raycastTarget = false;
+        holly.rectTransform.localEulerAngles = new Vector3(0, 0, tilt);
+    }
+
+    // Big festive button: soft gold glow behind a red rounded face with snow on top, an icon and a label.
+    static Button BigButton(string text, Sprite icon, Transform parent, Vector2 anchor, Vector2 pos, Vector2 size, Color colour, int fontSize, out Text label)
     {
         var holder = Rect(text + " Button", parent, anchor, pos, size);
         holder.gameObject.AddComponent<UIPopIn>();
+        holder.gameObject.AddComponent<ButtonBounce>();
         var glow = Rect("Glow", holder, new Vector2(0.5f, 0.5f), Vector2.zero, size * 1.7f).gameObject.AddComponent<Image>();
         glow.sprite = glowSprite;
         glow.color = new Color(Gold.r, Gold.g, Gold.b, 0.6f);
@@ -687,18 +826,33 @@ public static class ChristmasCardBuilder
         pulse.alphaAmount = 0.5f;
         pulse.speed = 3f;
         var face = Panel("Face", holder, new Vector2(0.5f, 0.5f), Vector2.zero, size, colour);
-        label = Label(text, face.transform, fontSize, Color.white, new Vector2(0.5f, 0.5f), Vector2.zero, size, Hex("5A0A0A"));
-        Deco(face.transform, new Vector2(0, 0.5f), new Vector2(55, 0), 54, 30, 0.9f);
-        Deco(face.transform, new Vector2(1, 0.5f), new Vector2(-55, 0), 54, -30, 0.9f);
+        SnowCap(face.transform, size.x);
+        Icon(face.transform, icon, new Vector2(-size.x / 2 + 95, -6), 96);
+        label = Label(text, face.transform, fontSize, Color.white, new Vector2(0.5f, 0.5f), new Vector2(45, -6), new Vector2(size.x - 170, size.y), Hex("5A0A0A"));
         return MakeButton(holder.gameObject, face);
     }
 
-    static Button SmallButton(string text, Transform parent, Vector2 anchor, Vector2 pos, out Text label)
+    // Small green button: icon on top, word underneath.
+    static Button SmallButton(string text, Sprite icon, Transform parent, Vector2 anchor, Vector2 pos, out Text label, out Image iconImage)
     {
-        var size = new Vector2(300, 140);
+        var size = new Vector2(170, 150);
         var face = Panel(text + " Button", parent, anchor, pos, size, Green);
-        label = Label(text, face.transform, 42, Color.white, new Vector2(0.5f, 0.5f), Vector2.zero, size, Hex("0A2A14"));
+        face.gameObject.AddComponent<ButtonBounce>();
+        SnowCap(face.transform, size.x);
+        iconImage = Icon(face.transform, icon, new Vector2(0, 14), 64);
+        label = Label(text, face.transform, 28, Color.white, new Vector2(0.5f, 0.5f), new Vector2(0, -46), new Vector2(size.x, 44), Hex("0A2A14"));
         return MakeButton(face.gameObject, face);
+    }
+
+    static Image Icon(Transform parent, Sprite sprite, Vector2 pos, float size)
+    {
+        var img = Rect("Icon", parent, new Vector2(0.5f, 0.5f), pos, new Vector2(size, size)).gameObject.AddComponent<Image>();
+        img.sprite = sprite;
+        img.raycastTarget = false;
+        var shadow = img.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = new Color(0, 0, 0, 0.35f);
+        shadow.effectDistance = new Vector2(0, -4);
+        return img;
     }
 
     static Button MakeButton(GameObject go, Image face)
@@ -727,17 +881,18 @@ public static class ChristmasCardBuilder
         return img;
     }
 
-    static Text Label(string text, Transform parent, int size, Color colour, Vector2 anchor, Vector2 pos, Vector2 rectSize, Color outline)
+    static Text Label(string text, Transform parent, int size, Color colour, Vector2 anchor, Vector2 pos, Vector2 rectSize, Color outline, Font withFont = null)
     {
         var t = Rect("Text", parent, anchor, pos, rectSize).gameObject.AddComponent<Text>();
         t.text = text;
-        t.font = font;
+        t.font = withFont ? withFont : font;
         t.fontSize = size;
         t.fontStyle = FontStyle.Bold;
         t.color = colour;
         t.alignment = TextAnchor.MiddleCenter;
         t.horizontalOverflow = HorizontalWrapMode.Wrap;
         t.verticalOverflow = VerticalWrapMode.Overflow;
+        t.lineSpacing = 0.9f;
         t.raycastTarget = false;
         var o = t.gameObject.AddComponent<Outline>();
         o.effectColor = outline;
@@ -786,6 +941,16 @@ public static class ChristmasCardBuilder
         roundSprite = Load<Sprite>(round);
         glowSprite = Load<Sprite>(MakeTexture("UI_Glow", 128, GlowAlpha, true));
         snowSprite = Load<Sprite>(MakeTexture("UI_Snowflake", 128, SnowflakeAlpha, true));
+        bulbSprite = Load<Sprite>(MakeTexture("UI_Bulb", 64, BulbAlpha, true));
+        cornerSprite = Load<Sprite>(MakeTexture("UI_Corner", 64, CornerAlpha, true));
+        noteSprite = Load<Sprite>(MakeTexture("UI_Icon_Music", 128, NoteAlpha, true));
+        noteOffSprite = Load<Sprite>(MakeTexture("UI_Icon_Muted", 128, NoteOffAlpha, true));
+        restartSprite = Load<Sprite>(MakeTexture("UI_Icon_Restart", 128, RestartAlpha, true));
+        giftSprite = Load<Sprite>(MakeTexture("UI_Icon_Gift", 128, GiftAlpha, true));
+        starSprite = Load<Sprite>(MakeTexture("UI_Icon_Star", 128, FivePointStarAlpha, true));
+        hollySprite = Load<Sprite>(MakeTexture("UI_Holly", 128, 128, HollyPixel, true, Vector4.zero, TextureWrapMode.Clamp));
+        snowCapSprite = Load<Sprite>(MakeTexture("UI_SnowCap", 128, 48,
+            (x, y) => new Color(1, 1, 1, SnowCapAlpha(x, y)), true, Vector4.zero, TextureWrapMode.Repeat));
 
         const string additive = "Legacy Shaders/Particles/Additive", blended = "Legacy Shaders/Particles/Alpha Blended";
         sparkleMat = MakeMaterial("FX_Sparkle", additive, star);
@@ -811,14 +976,20 @@ public static class ChristmasCardBuilder
         return m;
     }
 
-    // Writes a white texture whose alpha comes from alpha(x, y) with x, y in -0.5..0.5.
-    static string MakeTexture(string name, int size, System.Func<float, float, float> alpha, bool sprite, int border = 0)
+    // Square white texture whose alpha comes from alpha(x, y) with x, y in -0.5..0.5.
+    static string MakeTexture(string name, int size, System.Func<float, float, float> alpha, bool sprite, int border = 0) =>
+        MakeTexture(name, size, size, (x, y) => new Color(1, 1, 1, alpha(x, y)), sprite,
+                    new Vector4(border, border, border, border), TextureWrapMode.Clamp);
+
+    // Texture whose pixels come from pixel(x, y) with x, y in -0.5..0.5 across each axis.
+    static string MakeTexture(string name, int width, int height, System.Func<float, float, Color> pixel, bool sprite,
+                              Vector4 border, TextureWrapMode wrap)
     {
         string path = Gen + name + ".png";
-        var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
-        for (int y = 0; y < size; y++)
-            for (int x = 0; x < size; x++)
-                tex.SetPixel(x, y, new Color(1, 1, 1, alpha((x + 0.5f) / size - 0.5f, (y + 0.5f) / size - 0.5f)));
+        var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                tex.SetPixel(x, y, pixel((x + 0.5f) / width - 0.5f, (y + 0.5f) / height - 0.5f));
         File.WriteAllBytes(path, tex.EncodeToPNG());
         Object.DestroyImmediate(tex);
         AssetDatabase.ImportAsset(path);
@@ -826,19 +997,156 @@ public static class ChristmasCardBuilder
         var importer = (TextureImporter)AssetImporter.GetAtPath(path);
         importer.textureType = sprite ? TextureImporterType.Sprite : TextureImporterType.Default;
         importer.alphaIsTransparency = true;
-        importer.wrapMode = TextureWrapMode.Clamp;
+        importer.wrapMode = wrap;
         importer.mipmapEnabled = !sprite;
         if (sprite)
         {
             importer.spriteImportMode = SpriteImportMode.Single;
-            importer.spriteBorder = new Vector4(border, border, border, border);
+            importer.spriteBorder = border;
             var settings = new TextureImporterSettings();
             importer.ReadTextureSettings(settings);
-            settings.spriteMeshType = SpriteMeshType.FullRect; // needed for 9-slicing
+            settings.spriteMeshType = SpriteMeshType.FullRect; // needed for 9-slicing and tiling
             importer.SetTextureSettings(settings);
         }
         importer.SaveAndReimport();
         return path;
+    }
+
+    // ---------------------------------------------------------------- drawn shapes (x, y in -0.5..0.5)
+
+    // anti-aliased fill: 1 inside (d < 0), 0 outside, with a ~1.5 px soft edge at 128 px
+    static float Fill(float d, float edge = 0.012f) => Mathf.Clamp01(0.5f - d / edge);
+
+    static float BulbAlpha(float x, float y)
+    {
+        // teardrop: wide round bottom, narrower neck at the top
+        float w = Mathf.Lerp(0.42f, 0.24f, Mathf.Clamp01((y + 0.1f) / 0.55f));
+        float d = new Vector2(x / w, (y + 0.08f) / 0.42f).magnitude - 1;
+        return Fill(d * 0.4f, 0.02f);
+    }
+
+    static float CornerAlpha(float x, float y)
+    {
+        // top-left bracket: two thick rounded arms
+        float d = Mathf.Min(Segment(new Vector2(x, y), new Vector2(-0.38f, 0.38f), new Vector2(0.38f, 0.38f)),
+                            Segment(new Vector2(x, y), new Vector2(-0.38f, 0.38f), new Vector2(-0.38f, -0.38f)));
+        return Fill(d - 0.08f, 0.02f);
+    }
+
+    static float NoteAlpha(float x, float y)
+    {
+        var p = new Vector2(x, y);
+        float heads = Mathf.Min(Ellipse(p, new Vector2(-0.2f, -0.26f), new Vector2(0.14f, 0.1f), -20),
+                                Ellipse(p, new Vector2(0.22f, -0.18f), new Vector2(0.14f, 0.1f), -20));
+        float stems = Mathf.Min(Segment(p, new Vector2(-0.08f, -0.24f), new Vector2(-0.08f, 0.3f)),
+                                Segment(p, new Vector2(0.34f, -0.16f), new Vector2(0.34f, 0.38f))) - 0.035f;
+        float beam = Segment(p, new Vector2(-0.08f, 0.3f), new Vector2(0.34f, 0.38f)) - 0.065f;
+        return Fill(Mathf.Min(heads, Mathf.Min(stems, beam)));
+    }
+
+    static float NoteOffAlpha(float x, float y)
+    {
+        // the note with a clear gap cut around a diagonal slash, plus the slash itself
+        float slash = Segment(new Vector2(x, y), new Vector2(-0.4f, 0.4f), new Vector2(0.4f, -0.4f));
+        return Mathf.Max(NoteAlpha(x, y) * (1 - Fill(slash - 0.09f)), Fill(slash - 0.045f));
+    }
+
+    static float RestartAlpha(float x, float y)
+    {
+        var p = new Vector2(x, y);
+        float a = Mathf.Atan2(y, x) * Mathf.Rad2Deg;
+        float ring = Mathf.Abs(p.magnitude - 0.3f) - 0.06f;
+        bool inGap = a > 20 && a < 75; // opening at the top right
+        float arc = inGap ? 1 : ring;
+        // arrowhead at the 75° end, pointing clockwise into the gap
+        float r = 75 * Mathf.Deg2Rad;
+        var basePt = new Vector2(Mathf.Cos(r), Mathf.Sin(r)) * 0.3f;
+        var radial = new Vector2(Mathf.Cos(r), Mathf.Sin(r));
+        var clockwise = new Vector2(Mathf.Sin(r), -Mathf.Cos(r));
+        float head = Triangle(p, basePt + radial * 0.15f, basePt - radial * 0.15f, basePt + clockwise * 0.2f);
+        return Mathf.Max(Fill(arc), head);
+    }
+
+    static float GiftAlpha(float x, float y)
+    {
+        var p = new Vector2(x, y);
+        float body = Box(p, new Vector2(0, -0.14f), new Vector2(0.32f, 0.26f));
+        float lid = Box(p, new Vector2(0, 0.17f), new Vector2(0.38f, 0.08f));
+        float shape = Mathf.Min(body, lid);
+        // ribbon shows as gaps: a vertical cut, and a cut between lid and body
+        if (Mathf.Abs(x) < 0.045f || Mathf.Abs(y - 0.08f) < 0.018f) shape = 1;
+        float bow = Mathf.Min(Mathf.Abs(Ellipse(p, new Vector2(-0.13f, 0.34f), new Vector2(0.13f, 0.08f), 25)) - 0.035f,
+                              Mathf.Abs(Ellipse(p, new Vector2(0.13f, 0.34f), new Vector2(0.13f, 0.08f), -25)) - 0.035f);
+        return Fill(Mathf.Min(shape, bow));
+    }
+
+    static float FivePointStarAlpha(float x, float y)
+    {
+        float r = new Vector2(x, y).magnitude, a = Mathf.Atan2(y, x) - Mathf.PI / 2;
+        float edge = 0.19f + 0.24f * Mathf.Pow(0.5f + 0.5f * Mathf.Cos(5 * a), 2.2f);
+        return Fill(r - edge);
+    }
+
+    // two spiky leaves and three berries with a highlight (baked colours)
+    static Color HollyPixel(float x, float y)
+    {
+        var p = new Vector2(x, y);
+        Color leaf = Hex("1E7A34"), vein = Hex("6CC07A"), berry = Hex("D62828");
+        float best = 0;
+        Color c = Color.clear;
+        foreach (var (centre, angle) in new[] { (new Vector2(-0.18f, -0.08f), 35f), (new Vector2(0.18f, -0.08f), -35f) })
+        {
+            var q = Rotate(p - centre, -angle);
+            float spikes = 1 - 0.22f * Mathf.Abs(Mathf.Sin(q.x / 0.3f * Mathf.PI * 2.5f));
+            float d = new Vector2(q.x / 0.3f, q.y / (0.12f * spikes)).magnitude - 1;
+            float a = Fill(d * 0.12f, 0.012f);
+            if (a > best)
+            {
+                best = a;
+                c = Mathf.Abs(q.y) < 0.01f && Mathf.Abs(q.x) < 0.24f ? vein : leaf;
+            }
+        }
+        foreach (var centre in new[] { new Vector2(-0.07f, 0.1f), new Vector2(0.07f, 0.1f), new Vector2(0, 0.2f) })
+        {
+            float a = Fill((p - centre).magnitude - 0.075f);
+            if (a > 0.01f)
+            {
+                var shine = (p - centre - new Vector2(-0.025f, 0.025f)).magnitude < 0.022f;
+                c = Color.Lerp(c, shine ? Color.white : berry, a);
+                best = Mathf.Max(best, a);
+            }
+        }
+        c.a = best;
+        return c;
+    }
+
+    // solid snow on top, a wavy dripping bottom edge; one drip per tile so it repeats seamlessly
+    static float SnowCapAlpha(float x, float y)
+    {
+        float u = x + 0.5f, v = y + 0.5f;
+        float bottom = 0.42f - 0.32f * Mathf.Pow(0.5f + 0.5f * Mathf.Cos(2 * Mathf.PI * u), 4);
+        float top = 0.92f - 0.06f * Mathf.Pow(Mathf.Sin(Mathf.PI * u), 2); // slightly lumpy top
+        return Mathf.Clamp01((v - bottom) / 0.04f) * Mathf.Clamp01((top - v) / 0.04f);
+    }
+
+    static float Ellipse(Vector2 p, Vector2 centre, Vector2 radii, float degrees)
+    {
+        var q = Rotate(p - centre, -degrees);
+        return (new Vector2(q.x / radii.x, q.y / radii.y).magnitude - 1) * Mathf.Min(radii.x, radii.y);
+    }
+
+    static float Box(Vector2 p, Vector2 centre, Vector2 half)
+    {
+        var d = new Vector2(Mathf.Abs(p.x - centre.x) - half.x, Mathf.Abs(p.y - centre.y) - half.y);
+        return new Vector2(Mathf.Max(d.x, 0), Mathf.Max(d.y, 0)).magnitude + Mathf.Min(Mathf.Max(d.x, d.y), 0);
+    }
+
+    static float Triangle(Vector2 p, Vector2 a, Vector2 b, Vector2 c)
+    {
+        float Side(Vector2 p1, Vector2 p2) => (p.x - p2.x) * (p1.y - p2.y) - (p1.x - p2.x) * (p.y - p2.y);
+        float d1 = Side(a, b), d2 = Side(b, c), d3 = Side(c, a);
+        bool neg = d1 < 0 || d2 < 0 || d3 < 0, pos = d1 > 0 || d2 > 0 || d3 > 0;
+        return neg && pos ? 0 : 1;
     }
 
     // four-point sparkle with a soft halo
