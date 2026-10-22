@@ -3,13 +3,11 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using Vuforia;
-using Image = UnityEngine.UI.Image; // Vuforia also has an Image type
 
 // Runs the Christmas card as a state machine:
 //   Idle → Scanned → TreeUp → SantaArriving → GiftsReady ⇄ Opening → Finished
-// Losing the card (not TRACKED for lostGrace seconds) pauses everything (Time.timeScale = 0)
-// and shows "Find the card again"; progress is kept.
+// CardHub decides when the card is found or lost and shows/hides this experience.
+// Losing the card pauses everything (Time.timeScale = 0) and shows "Find the card again"; progress is kept.
 // All references are filled in by Tools > Christmas Card > 2. Build Greeting Card.
 public class GreetingCardController : MonoBehaviour
 {
@@ -26,7 +24,6 @@ public class GreetingCardController : MonoBehaviour
 
     [Header("Scene")]
     public Camera arCamera;
-    public float lostGrace = 0.5f; // ignores brief TRACKED ↔ EXTENDED_TRACKED flickers
     public Transform content;      // under the image target; card is 1 unit wide, ~0.71 deep
     public Transform tree;         // pivot at the base centre
     public TreeLights treeLights;
@@ -55,7 +52,8 @@ public class GreetingCardController : MonoBehaviour
     [Range(0, 1)] public float musicVolume = 0.6f;
 
     [Header("UI")]
-    public GameObject scanScreen, startScreen, hud, lostScreen, finishScreen;
+    public GameObject uiRoot;      // the whole Christmas UI; hidden on the home screen
+    public GameObject startScreen, hud, lostScreen, finishScreen;
     public Text guideText;         // one line telling the player what to do next
     public Button getGiftButton;
     public Text soundLabel;
@@ -74,9 +72,6 @@ public class GreetingCardController : MonoBehaviour
     Vector3 sleighPrev, sleighForward = Vector3.forward;
     float sleighRoll;
     AudioClip mainMusic;
-    ObserverBehaviour cardTarget;
-    bool cardVisible;
-    float notTrackedSince = -1;
 
     void Awake()
     {
@@ -84,33 +79,21 @@ public class GreetingCardController : MonoBehaviour
         treeRotation = tree.localRotation;
         santaScale = santa.localScale;
         mainMusic = music.clip;
-        cardTarget = content.GetComponentInParent<ObserverBehaviour>(); // the image target the card content lives under
-        cardTarget.OnTargetStatusChanged += OnCardStatus;
         ResetScene();
         SetState(State.Idle);
     }
 
-    void OnDestroy()
+    // ---------- Called by CardHub ----------
+
+    // Shows or hides this card's UI and its 3D content (hidden while the home screen is up,
+    // even if Vuforia is still extended-tracking the card).
+    public void SetShown(bool shown)
     {
-        if (cardTarget) cardTarget.OnTargetStatusChanged -= OnCardStatus;
+        uiRoot.SetActive(shown);
+        foreach (var r in content.GetComponentsInChildren<Renderer>(true)) r.enabled = shown;
     }
 
-    // ---------- Tracking ----------
-    // Only a camera-confirmed TRACKED counts as found. EXTENDED_TRACKED is what Vuforia reports when the
-    // card leaves the view (the phone is guessing), so it counts as lost once it lasts longer than lostGrace.
-
-    void OnCardStatus(ObserverBehaviour _, TargetStatus status)
-    {
-        if (status.Status == Status.TRACKED)
-        {
-            notTrackedSince = -1;
-            if (!cardVisible) { cardVisible = true; OnCardFound(); }
-        }
-        else if (cardVisible && notTrackedSince < 0)
-            notTrackedSince = Time.unscaledTime;
-    }
-
-    void OnCardFound()
+    public void OnCardFound()
     {
         if (Current == State.Idle) { SetState(State.Scanned); return; }
         Time.timeScale = 1;
@@ -118,7 +101,7 @@ public class GreetingCardController : MonoBehaviour
         lostScreen.SetActive(false);
     }
 
-    void OnCardLost()
+    public void OnCardLost()
     {
         if (Current == State.Idle) return;
         Time.timeScale = 0;          // freezes every tween, particle and animator
@@ -320,13 +303,6 @@ public class GreetingCardController : MonoBehaviour
 
     void Update()
     {
-        if (notTrackedSince >= 0 && Time.unscaledTime - notTrackedSince > lostGrace)
-        {
-            notTrackedSince = -1;
-            cardVisible = false;
-            OnCardLost();
-        }
-
         if (Time.timeScale == 0 || !TapStarted(out Vector2 screen)) return;
         var hits = Physics.RaycastAll(arCamera.ScreenPointToRay(screen), 100f);
 
@@ -459,7 +435,6 @@ public class GreetingCardController : MonoBehaviour
     void SetState(State s)
     {
         Current = s;
-        scanScreen.SetActive(s == State.Idle);
         startScreen.SetActive(s == State.Scanned);
         hud.SetActive(s >= State.TreeUp);
         getGiftButton.gameObject.SetActive(s == State.TreeUp || s == State.SantaArriving);
@@ -469,7 +444,6 @@ public class GreetingCardController : MonoBehaviour
         int left = giftSpots.Length - giftsOpened;
         switch (s)
         {
-            case State.Idle: guideText.text = "Point your camera at your Christmas card"; break;
             case State.Scanned: guideText.text = "Card found! Tap Start to begin"; break;
             case State.TreeUp: guideText.text = "Watch your Christmas tree grow..."; break;
             case State.SantaArriving: guideText.text = "Here comes Santa!\nListen for the sleigh bells..."; break;
