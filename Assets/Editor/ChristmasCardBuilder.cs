@@ -22,7 +22,7 @@ public static class ChristmasCardBuilder
 
     // Card is 1 unit wide and 0.71 deep (image target size). Everything below is in card units.
     const float CardHalfW = 0.5f, CardHalfD = 0.354f;
-    const float TreeHeight = 1.5f, GiftHeight = 0.13f, RewardSize = 0.12f, SantaHeight = 0.45f, SleighLength = 1.0f;
+    const float TreeHeight = 1.5f, GiftHeight = 0.18f, RewardSize = 0.15f, SantaHeight = 0.45f, SleighLength = 1.6f;
 
     static readonly Color Red = Hex("C62828"), Green = Hex("1F6B3A"), Gold = Hex("FFC940"), Cream = Hex("FFF8E7");
 
@@ -548,7 +548,7 @@ public static class ChristmasCardBuilder
         all = WorldBounds(root.gameObject);
         var col = root.gameObject.AddComponent<BoxCollider>();
         col.center = all.center;
-        col.size = all.size * 1.3f; // generous tap target
+        col.size = all.size * 1.6f; // tap target bigger than the box, so it's easy to hit on a phone
 
         var glow = NewPS("Glow", root, glowMat, local: true);
         glow.transform.localPosition = new Vector3(0, all.size.y * 0.2f, 0);
