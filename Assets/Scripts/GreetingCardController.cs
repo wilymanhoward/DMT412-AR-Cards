@@ -47,7 +47,7 @@ public class GreetingCardController : MonoBehaviour
     [Header("Ring the bell, Santa visits")]
     public Transform bell;                         // hanger: pivot at the top so the bell swings
     public int ringsNeeded = 3;
-    public Transform santaEnter, santaStand, goldenSpot; // drag these in the scene to adjust the walk
+    public Transform santaStand, goldenSpot; // in front of the tree; drag these in the scene to adjust
     public GameObject goldenGiftTemplate;
     public Transform peekHide, peekShow, peekExit; // "lean in" bonus path
     public float leanDistance = 1.4f;              // card units from the camera to the middle of the tree
@@ -172,7 +172,7 @@ public class GreetingCardController : MonoBehaviour
         yield return new WaitForSeconds(0.4f);
 
         fx.glitter.Play();
-        PuffRing(0.25f, 6);
+        PuffRing(tree.localPosition, 0.25f, 6);
         yield return Ease.Run(2f, t =>
         {
             float xz = Mathf.Lerp(0.6f, 1f, Ease.OutCubic(t));
@@ -180,7 +180,7 @@ public class GreetingCardController : MonoBehaviour
         });
         fx.glitter.Stop();
         fx.sparkleRing.Stop();
-        PuffRing(0.3f, 8);
+        PuffRing(tree.localPosition, 0.3f, 8);
 
         // "lights on!": a golden burst at the star, then the tree comes alive
         fx.Rare(treeLights.star.position);
@@ -479,25 +479,12 @@ public class GreetingCardController : MonoBehaviour
         yield return Ease.Run(0.35f, t => bell.localScale = bellScale * (1 - Ease.InBack(t)));
         bell.gameObject.SetActive(false);
 
-        // Santa walks in from the edge of the card
-        santa.gameObject.SetActive(true);
-        santa.localScale = santaScale;
-        santa.localPosition = santaEnter.localPosition;
-        santa.localRotation = Quaternion.LookRotation(santaStand.localPosition - santaEnter.localPosition, Vector3.up);
-        fx.Puff(santa.position, 16);
-        PlaySfx(whooshClip, 0.5f);
-        santaAnim.CrossFade("Walk", 0.1f);
-        yield return Ease.Run(2.2f, t =>
-            santa.localPosition = Vector3.Lerp(santaEnter.localPosition, santaStand.localPosition, Ease.InOutSine(t)));
-
-        // turns to you, waves, and talks
-        Quaternion from = santa.localRotation, toCamera = Quaternion.Euler(0, 180, 0);
-        santaAnim.CrossFade("Wave", 0.25f);
-        yield return Ease.Run(0.4f, t => santa.localRotation = Quaternion.Slerp(from, toCamera, Ease.OutCubic(t)));
-        guideText.text = "Ho ho ho!\nSanta has a surprise for you!";
-        yield return new WaitForSeconds(2.2f);
+        // Santa appears by magic in front of the tree, facing you and waving, then talks
+        guideText.text = "Ho ho ho!";
+        yield return SantaAppear(santaStand.localPosition, Quaternion.Euler(0, 180, 0), grand: true);
         santaAnim.CrossFade("Talk", 0.3f);
-        yield return new WaitForSeconds(1.2f);
+        guideText.text = "Ho ho ho!\nSanta has a surprise for you!";
+        yield return new WaitForSeconds(1.6f);
 
         // the golden present pops down beside him
         var gift = Instantiate(goldenGiftTemplate, content);
@@ -516,6 +503,45 @@ public class GreetingCardController : MonoBehaviour
         SetState(State.GoldenGift);
     }
 
+    // Santa never just pops in. Grand: a golden spiral gathers and snow puffs ring the spot (anticipation),
+    // a flash, then he grows in with a full spin and an overshoot while waving, and squashes as he lands.
+    // Otherwise (the peek, half hidden behind the tree): a quick sparkle and grow-in.
+    IEnumerator SantaAppear(Vector3 at, Quaternion facing, bool grand)
+    {
+        santa.gameObject.SetActive(true);
+        santa.localPosition = at;
+        santa.localScale = Vector3.zero;
+        Vector3 world = content.TransformPoint(at);
+        float yaw = facing.eulerAngles.y;
+
+        if (grand)
+        {
+            fx.magicSwirl.transform.localPosition = at;
+            fx.magicSwirl.Play();
+            PlaySfx(sparkleClip);
+            PuffRing(at, 0.15f, 8);
+            yield return new WaitForSeconds(0.7f);
+            fx.Rare(world + content.up * 0.3f);
+            PlaySfx(rareClip, 0.8f);
+            santaAnim.CrossFade("Wave", 0.05f);
+        }
+        else fx.Sparkle(world + content.up * 0.2f, 25);
+
+        float spin = grand ? 360f : 0f;
+        yield return Ease.Run(grand ? 0.7f : 0.4f, t =>
+        {
+            santa.localScale = santaScale * Ease.OutBack(t, 1.4f);
+            santa.localRotation = Quaternion.Euler(0, yaw - spin * (1 - Ease.OutCubic(t)), 0);
+        });
+        if (grand)
+        {
+            yield return Ease.Run(0.25f, t => santa.localScale = Squash(santaScale, 0.12f * Mathf.Sin(Mathf.PI * t)));
+            fx.magicSwirl.Stop();
+            yield return new WaitForSeconds(1f); // let the wave finish before he moves on
+        }
+        santa.localScale = santaScale;
+    }
+
     // ---------- Bonus: lean in close and Santa peeks out ----------
 
     void CheckLeanIn()
@@ -532,10 +558,8 @@ public class GreetingCardController : MonoBehaviour
 
     IEnumerator SantaPeek()
     {
-        santa.gameObject.SetActive(true);
-        santa.localScale = santaScale;
-        santa.localPosition = peekHide.localPosition;
-        santa.localRotation = Quaternion.LookRotation(peekShow.localPosition - peekHide.localPosition, Vector3.up);
+        yield return SantaAppear(peekHide.localPosition,
+            Quaternion.LookRotation(peekShow.localPosition - peekHide.localPosition, Vector3.up), grand: false);
         santaAnim.CrossFade("Walk", 0.1f);
         yield return Ease.Run(0.8f, t => santa.localPosition = Vector3.Lerp(peekHide.localPosition, peekShow.localPosition, Ease.OutCubic(t)));
 
@@ -651,12 +675,12 @@ public class GreetingCardController : MonoBehaviour
         bells.Stop();
     }
 
-    void PuffRing(float radius, int count)
+    void PuffRing(Vector3 centre, float radius, int count)
     {
         for (int i = 0; i < count; i++)
         {
             float a = i * 2 * Mathf.PI / count;
-            fx.Puff(content.TransformPoint(tree.localPosition + radius * new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a))), 6);
+            fx.Puff(content.TransformPoint(centre + radius * new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a))), 6);
         }
     }
 
