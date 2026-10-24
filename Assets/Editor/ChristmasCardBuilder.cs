@@ -90,12 +90,11 @@ public static class ChristmasCardBuilder
         c.giftTemplates = gifts;
         c.goldenGiftTemplate = goldenGift;
         c.bell = bell;
-        c.santaEnter = santaSpots[0];
-        c.santaStand = santaSpots[1];
-        c.goldenSpot = santaSpots[2];
-        c.peekHide = santaSpots[3];
-        c.peekShow = santaSpots[4];
-        c.peekExit = santaSpots[5];
+        c.santaStand = santaSpots[0];
+        c.goldenSpot = santaSpots[1];
+        c.peekHide = santaSpots[2];
+        c.peekShow = santaSpots[3];
+        c.peekExit = santaSpots[4];
         c.rewards = rewards;
         c.fx = fx;
         c.circleRadius = treeRadius + SleighLength * 0.3f + 0.1f; // keeps the bigger sleigh clear of the branches
@@ -451,6 +450,32 @@ public static class ChristmasCardBuilder
         Fade(rain, 0.05f, 0.85f);
         fx.confettiRain = rain;
 
+        // golden spiral that gathers where Santa appears (the controller moves it to the spot)
+        var swirl = NewPS("Magic Swirl", root, sparkleMat, local: true);
+        main = swirl.main;
+        main.startLifetime = Range(1f, 1.4f);
+        main.startSpeed = 0;
+        main.startSize = Range(0.02f, 0.045f);
+        main.startRotation = Range(0, Mathf.PI * 2);
+        main.startColor = Colors(Gold, Color.white, Hex("FFE08A"));
+        main.maxParticles = 200;
+        em = swirl.emission;
+        em.rateOverTime = 90;
+        sh = swirl.shape;
+        sh.shapeType = ParticleSystemShapeType.Circle;
+        sh.radius = 0.18f;
+        sh.radiusThickness = 0;
+        sh.rotation = new Vector3(90, 0, 0);
+        vel = swirl.velocityOverLifetime;
+        vel.enabled = true;
+        vel.space = ParticleSystemSimulationSpace.Local;
+        vel.x = Range(0, 0);
+        vel.y = Range(0.35f, 0.6f);
+        vel.z = Range(0, 0);
+        vel.orbitalY = 4f; // tight, fast spiral
+        SizeCurve(swirl, 0, 0, 0.2f, 1, 0.8f, 1, 1, 0);
+        fx.magicSwirl = swirl;
+
         return fx;
     }
 
@@ -679,15 +704,15 @@ public static class ChristmasCardBuilder
     }
 
     // Where Santa walks in from and stops, where the golden present lands, and the peek path.
-    // Front-right of the card is kept free of gifts for him. Drag the spots in the scene to adjust.
+    // He appears in front of the tree, just past the card's front edge so the branches don't cut through him,
+    // and the golden present lands beside him. Drag the spots in the scene to adjust.
     static Transform[] BuildSantaSpots(Transform content)
     {
         var root = NewChild("Santa Spots", content);
         var spots = new[]
         {
-            ("Walk In From", new Vector3(CardHalfW + 0.45f, 0, -0.12f)),   // off the right edge
-            ("Stand", new Vector3(CardHalfW - 0.02f, 0, -0.08f)),  // at the edge: the taller Santa stays clear of the branches
-            ("Golden Present", new Vector3(CardHalfW - 0.17f, 0, -0.27f)),
+            ("Stand", new Vector3(0, 0, -(CardHalfD + 0.16f))),            // centred, in front of the tree
+            ("Golden Present", new Vector3(0.24f, 0, -(CardHalfD + 0.1f))), // beside him, toward the camera
             ("Peek Hide", new Vector3(0.15f, 0, 0.32f)),                   // behind the tree
             ("Peek Show", new Vector3(0.52f, 0, -0.02f)),                  // just right of the tree
             ("Peek Exit", new Vector3(1.1f, 0, 0.6f)),
