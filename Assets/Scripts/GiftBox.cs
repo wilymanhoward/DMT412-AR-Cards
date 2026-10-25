@@ -13,6 +13,8 @@ public class GiftBox : MonoBehaviour
     [HideInInspector] public GreetingCardController controller;
     public bool Opened { get; private set; }
     public bool Claimed { get; set; } // a kid is already on the way to open it
+    public bool RewardShown { get; set; } // the reward has popped out, so RewardRare is known
+    public bool RewardRare { get; set; }
 
     bool ready;
     float nextShake;
