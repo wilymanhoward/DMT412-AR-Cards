@@ -8,7 +8,8 @@ using UnityEngine.UI;
 //   Idle → Scanned → HouseUp → SantaArriving → Reveal → GiftsReady ⇄ Opening → BellReady → SantaVisit → GoldenGift → Finished
 // A snowy house rises from the card; Santa's sleigh drops the gifts down the chimney; the house opens like a dollhouse
 // (roof lifts off, front wall folds down); the gifts fall into the room; tapping one sends a kid running to open it;
-// three bell rings open the back door and Santa walks in with a golden present.
+// three bell rings open the back door, the kids run to greet Santa, and he gives them a golden present;
+// after the party he waves goodbye and walks back out.
 // CardHub decides when the card is found or lost and shows/hides this experience.
 // Losing the card pauses everything (Time.timeScale = 0) and shows "Find the card again"; progress is kept.
 // All references are filled in by Tools > Christmas Card > 2. Build Greeting Card.
@@ -49,6 +50,8 @@ public class GreetingCardController : MonoBehaviour
     [Header("Santa's flight (card units)")]
     public float circleRadius = 0.75f;
     public float circleHeight = 0.8f;
+    public float flightClearance = 0.45f; // the sleigh circles at least this far above the top of the house...
+    public float maxFlightRadius = 0.9f;  // ...and no wider than this, so it stays over the house and in view
     public int laps = 2;
     public float lapTime = 4f;
     public float approachTime = 3f;
@@ -85,7 +88,7 @@ public class GreetingCardController : MonoBehaviour
     public State Current { get; private set; } = State.Idle;
 
     readonly List<GameObject> spawned = new List<GameObject>();
-    int giftsLanded, giftsOpened, nextKid;
+    int giftsLanded, giftsOpened, kidsArrived;
     bool houseReady, revealed, muted;
     float nextTreePoke;
     Quaternion treeRotation, doorRotation;
@@ -100,6 +103,10 @@ public class GreetingCardController : MonoBehaviour
     float bellRungAt = -10f;
     Vector3 roofPos, roofScale, wallScale;
     Quaternion roofRot, wallRot;
+    float flightRadius, flightHeight;
+    bool[] kidBusy;            // on the way to a gift or opening it
+    Coroutine[] kidRoutines;   // reacting / walking home; cancelled when the kid is needed again
+    FireCrackle fire;
 
     void Awake()
     {
@@ -109,6 +116,9 @@ public class GreetingCardController : MonoBehaviour
         santaScale = santa.localScale;
         santaAnim = santa.GetComponentInChildren<Animator>();
         kidAnims = System.Array.ConvertAll(kids, k => k.GetComponentInChildren<Animator>());
+        kidBusy = new bool[kids.Length];
+        kidRoutines = new Coroutine[kids.Length];
+        fire = FireCrackle.Create(house, fx.sparkle.GetComponent<ParticleSystemRenderer>().sharedMaterial);
         bellScale = bell.localScale;
         roofPos = roof.localPosition; roofRot = roof.localRotation; roofScale = roof.localScale;
         wallRot = frontWall.localRotation; wallScale = frontWall.localScale;
@@ -212,13 +222,15 @@ public class GreetingCardController : MonoBehaviour
     {
         SetState(State.SantaArriving);
 
-        Vector3 center = Vector3.up * circleHeight;
+        flightRadius = Mathf.Min(circleRadius, maxFlightRadius);
+        flightHeight = Mathf.Max(circleHeight, houseHeight + flightClearance);
+        Vector3 center = Vector3.up * flightHeight;
         float entry = BestEntryAngle(center);
         Vector3 entryPoint = OnCircle(center, entry);
         Vector3 tangent = Tangent(entry);
         // Bezier handle sized so the sleigh joins the circle at exactly the circling speed
         // (the arrive/depart easings below have slope 0.5 at the joint).
-        float speed = 2 * Mathf.PI * circleRadius / lapTime;
+        float speed = 2 * Mathf.PI * flightRadius / lapTime;
         float handle = speed * approachTime / 1.5f;
 
         sleigh.gameObject.SetActive(true);
@@ -327,6 +339,7 @@ public class GreetingCardController : MonoBehaviour
         foreach (var kid in kids) kid.gameObject.SetActive(true);
         yield return Ease.Run(0.9f, t => frontWall.localRotation = wallRot * Quaternion.Euler(-90f * Ease.OutBounce(t), 0, 0));
         fx.Puff(frontWall.position, 20);
+        Haptics.Buzz(60, Haptics.Medium); // the wall thumps down
         yield return Ease.Run(0.35f, t => frontWall.localScale = wallScale * (1 - Ease.InBack(t)));
         roof.gameObject.SetActive(false);
         frontWall.gameObject.SetActive(false);
@@ -338,6 +351,12 @@ public class GreetingCardController : MonoBehaviour
         treeLights.enabled = true;
         treeLights.Jiggle(0.6f);
         fx.orbitStars.Play();
+        if (fire) // the fireplace crackles to life
+        {
+            fire.Ignite();
+            PlaySfx(whooshClip, 0.4f);
+            Haptics.Buzz(30, Haptics.Light);
+        }
         foreach (var anim in kidAnims) anim.CrossFade("Wave", 0.2f);
         guideText.text = "Look out above!";
         yield return new WaitForSeconds(0.8f);
@@ -380,6 +399,7 @@ public class GreetingCardController : MonoBehaviour
         // landing: snow puff, squash, a hop with stretch, then settle
         fx.Puff(g.position, 10);
         PlaySfx(landClip, 0.7f);
+        Haptics.Buzz(25, Haptics.Light);
         yield return Ease.Run(0.08f, t => g.localScale = Squash(full, 0.3f * Ease.OutQuad(t)));
         yield return Ease.Run(0.35f, t =>
         {
@@ -424,17 +444,20 @@ public class GreetingCardController : MonoBehaviour
             if (hit.collider.transform == tree) { PokeTree(hit.point); return; }
     }
 
-    // Kids take turns: the next one runs to the gift, the gift opens, and they jump for joy.
+    // The nearest free kid runs to the gift you tapped and opens it. When the reward pops out, both kids react
+    // (they cheer longer for a rare find), then walk back to their spots.
     IEnumerator KidOpens(GiftBox box)
     {
         box.Claimed = true;
         SetState(State.Opening);
-        int k = nextKid;
-        nextKid = (nextKid + 1) % kids.Length;
+        Vector3 giftPos = box.transform.localPosition;
+        int k;
+        while ((k = PickKid(giftPos)) < 0) yield return null; // both kids are busy: wait for one to be free
+        kidBusy[k] = true;
+        StopKidRoutine(k);
         Transform kid = kids[k];
         Animator anim = kidAnims[k];
 
-        Vector3 giftPos = box.transform.localPosition;
         Vector3 away = Flat(kid.localPosition - giftPos);
         Vector3 stop = giftPos + (away.sqrMagnitude > 1e-6f ? away.normalized : Vector3.back) * 0.09f;
         yield return RunTo(kid, anim, stop);
@@ -442,10 +465,79 @@ public class GreetingCardController : MonoBehaviour
 
         anim.CrossFade("Look", 0.15f);
         box.Open();
-        yield return new WaitForSeconds(1.2f);
+        for (float wait = 0; !box.RewardShown && wait < 3f; wait += Time.deltaTime) yield return null;
+        kidBusy[k] = false;
+
+        bool strong = box.RewardRare;
+        kidRoutines[k] = StartCoroutine(KidReacts(k, giftPos, strong));
+        for (int j = 0; j < kids.Length; j++)
+            if (j != k && !kidBusy[j])
+            {
+                StopKidRoutine(j);
+                kidRoutines[j] = StartCoroutine(KidReacts(j, giftPos, strong));
+            }
+    }
+
+    // The nearest kid who isn't on the way to a gift; -1 if all of them are.
+    int PickKid(Vector3 giftPos)
+    {
+        int best = -1;
+        float bestDistance = float.MaxValue;
+        for (int i = 0; i < kids.Length; i++)
+        {
+            if (kidBusy[i]) continue;
+            float d = Vector3.Distance(Flat(kids[i].localPosition), Flat(giftPos));
+            if (d < bestDistance) { best = i; bestDistance = d; }
+        }
+        return best;
+    }
+
+    // Turns to the gift and cheers, then walks back to its spot and settles down.
+    IEnumerator KidReacts(int k, Vector3 giftPos, bool strong)
+    {
+        Transform kid = kids[k];
+        Animator anim = kidAnims[k];
+        yield return Face(kid, giftPos);
         anim.CrossFade("Cheer", 0.2f);
-        yield return new WaitForSeconds(2.5f);
-        if (Current != State.Finished) anim.CrossFade("Look", 0.3f);
+        yield return new WaitForSeconds(strong ? 3.5f : 1.8f);
+        yield return RunTo(kid, anim, kidHomes[k].localPosition);
+        Quaternion from = kid.localRotation, home = kidHomes[k].localRotation;
+        yield return Ease.Run(0.25f, t => kid.localRotation = Quaternion.Slerp(from, home, Ease.OutCubic(t)));
+        anim.CrossFade("Look", 0.3f);
+        kidRoutines[k] = null;
+    }
+
+    void StopKidRoutine(int k)
+    {
+        if (kidRoutines[k] != null) StopCoroutine(kidRoutines[k]);
+        kidRoutines[k] = null;
+    }
+
+    void StopKidRoutines()
+    {
+        for (int i = 0; i < kids.Length; i++) StopKidRoutine(i);
+    }
+
+    // Both kids run to Santa's sides, turn to him and wave.
+    IEnumerator KidsGreetSanta()
+    {
+        StopKidRoutines();
+        Vector3 s = santaStand.localPosition;
+        kidsArrived = 0;
+        for (int i = 0; i < kids.Length; i++)
+        {
+            float side = i % 2 == 0 ? -1f : 1f;
+            StartCoroutine(KidGreets(i, s + new Vector3(side * 0.2f, 0, -0.1f), s));
+        }
+        while (kidsArrived < kids.Length) yield return null;
+    }
+
+    IEnumerator KidGreets(int k, Vector3 spot, Vector3 santaPos)
+    {
+        yield return RunTo(kids[k], kidAnims[k], spot);
+        yield return Face(kids[k], santaPos);
+        kidAnims[k].CrossFade("Wave", 0.2f);
+        kidsArrived++;
     }
 
     IEnumerator RunTo(Transform who, Animator anim, Vector3 to)
@@ -474,16 +566,23 @@ public class GreetingCardController : MonoBehaviour
         fx.Sparkle(point, 25);
         fx.Sparkle(treeLights.star.position, 20);
         PlaySfx(treeTapClip ? treeTapClip : sparkleClip, 0.8f);
+        Haptics.Buzz(20, Haptics.Light);
     }
 
     public void OnGiftOpening() => SetState(State.Opening);
-    public void PlayPop() => PlaySfx(popClip);
+    public void PlayPop()
+    {
+        PlaySfx(popClip);
+        Haptics.Buzz(45, Haptics.Medium);
+    }
     public void ReleaseReward(GiftBox box, Vector3 top) => StartCoroutine(RewardRoutine(box, top));
 
     IEnumerator RewardRoutine(GiftBox box, Vector3 top)
     {
         bool golden = box.golden;
         var reward = golden ? PickRare() : PickReward(); // Santa's golden present is always rare
+        box.RewardRare = reward.rare || golden; // the kids react to this
+        box.RewardShown = true;
         var go = Instantiate(reward.prefab, content);
         go.SetActive(true);
         spawned.Add(go);
@@ -495,7 +594,7 @@ public class GreetingCardController : MonoBehaviour
         r.localPosition = start;
         r.localScale = Vector3.zero;
 
-        if (reward.rare) { fx.Rare(top); PlaySfx(rareClip); }
+        if (reward.rare) { fx.Rare(top); PlaySfx(rareClip); Haptics.Celebrate(); }
         else PlaySfx(sparkleClip);
         if (golden) { fx.Firework(top + content.up * 0.3f); fx.Confetti(top); }
 
@@ -603,6 +702,7 @@ public class GreetingCardController : MonoBehaviour
         bellRungAt = Time.time;
         rings++;
         PlaySfx(bellClip ? bellClip : sparkleClip);
+        Haptics.Buzz(40, Haptics.Medium);
         fx.Sparkle(bell.position, 35);
         treeLights.Jiggle(0.6f);
         UpdateSpirit();
@@ -631,6 +731,7 @@ public class GreetingCardController : MonoBehaviour
 
         // the back door swings open
         PlaySfx(whooshClip, 0.5f);
+        Haptics.Buzz(50, Haptics.Medium);
         yield return Ease.Run(0.8f, t => door.localRotation = doorRotation * Quaternion.Euler(0, -100f * Ease.OutBack(t), 0));
 
         // Santa appears by magic just outside, then walks in through the door
@@ -641,9 +742,8 @@ public class GreetingCardController : MonoBehaviour
         yield return Ease.Run(1.6f, t =>
             santa.localPosition = Vector3.Lerp(santaOutside.localPosition, santaStand.localPosition, Ease.InOutSine(t)));
 
-        // the kids wave, Santa turns to them and talks
-        foreach (var anim in kidAnims) anim.CrossFade("Wave", 0.2f);
-        yield return Face(santa, kids[0].localPosition);
+        // the kids run over to greet him, and he talks to them
+        yield return KidsGreetSanta();
         santaAnim.CrossFade("Talk", 0.3f);
         guideText.text = "Ho ho ho!\nSanta has a surprise for you!";
         yield return new WaitForSeconds(1.6f);
@@ -683,6 +783,7 @@ public class GreetingCardController : MonoBehaviour
         yield return new WaitForSeconds(0.7f);
         fx.Rare(world + content.up * 0.2f);
         PlaySfx(rareClip, 0.8f);
+        Haptics.Buzz(60, Haptics.Medium);
         santaAnim.CrossFade("Wave", 0.05f);
 
         yield return Ease.Run(0.7f, t =>
@@ -702,11 +803,14 @@ public class GreetingCardController : MonoBehaviour
     {
         yield return new WaitForSeconds(0.8f);
         SetState(State.Finished);
+        StopKidRoutines();
         treeLights.Jiggle(1.5f); // the tree celebrates too
         fx.confettiRain.Play();
+        Haptics.Celebrate();
         StartCoroutine(FinaleMusic());
         santaAnim.CrossFade("Dance", 0.3f);
         foreach (var anim in kidAnims) anim.CrossFade("Cheer", 0.3f);
+        StartCoroutine(SantaGoodbye());
 
         Vector3 sky = Vector3.up * (houseHeight * 0.8f);
         while (true)
@@ -716,6 +820,37 @@ public class GreetingCardController : MonoBehaviour
             PlaySfx(fireworksClip, 0.6f);
             yield return new WaitForSeconds(Random.Range(0.45f, 0.9f));
         }
+    }
+
+    // After the party Santa waves goodbye (the kids wave back), walks out through the back door, and the door
+    // closes behind him.
+    IEnumerator SantaGoodbye()
+    {
+        yield return new WaitForSeconds(6f); // he dances along with everyone first
+
+        Quaternion from = santa.localRotation, toCamera = Quaternion.Euler(0, 180, 0);
+        yield return Ease.Run(0.3f, t => santa.localRotation = Quaternion.Slerp(from, toCamera, Ease.OutCubic(t)));
+        santaAnim.CrossFade("Wave", 0.25f);
+        foreach (var anim in kidAnims) anim.CrossFade("Wave", 0.25f);
+        guideText.text = "Bye bye, Santa!";
+        PlaySfx(bellClip ? bellClip : sparkleClip, 0.7f);
+        yield return new WaitForSeconds(2.8f);
+
+        // turns and walks out the way he came
+        Vector3 start = santa.localPosition, end = santaOutside.localPosition;
+        Quaternion here = santa.localRotation, toDoor = Quaternion.LookRotation(Flat(end - start), Vector3.up);
+        yield return Ease.Run(0.4f, t => santa.localRotation = Quaternion.Slerp(here, toDoor, Ease.OutCubic(t)));
+        santaAnim.CrossFade("Walk", 0.2f);
+        yield return Ease.Run(1.8f, t => santa.localPosition = Vector3.Lerp(start, end, Ease.InOutSine(t)));
+        fx.Puff(santa.position, 14);
+        PlaySfx(whooshClip, 0.5f);
+        yield return Ease.Run(0.25f, t => santa.localScale = santaScale * (1 - Ease.InBack(t)));
+        santa.gameObject.SetActive(false);
+
+        // the door closes behind him and the kids go back to cheering
+        yield return Ease.Run(0.7f, t => door.localRotation = doorRotation * Quaternion.Euler(0, -100f * (1 - Ease.InOutSine(t)), 0));
+        foreach (var anim in kidAnims) anim.CrossFade("Cheer", 0.3f);
+        guideText.text = "See you next Christmas!";
     }
 
     // Fade the carol out, play the finale tune once, then bring the carol back.
@@ -769,7 +904,7 @@ public class GreetingCardController : MonoBehaviour
     {
         foreach (var go in spawned) if (go) Destroy(go);
         spawned.Clear();
-        giftsLanded = giftsOpened = nextKid = 0;
+        giftsLanded = giftsOpened = 0;
         houseReady = revealed = false;
         treeLights.enabled = false;
         tree.localRotation = treeRotation;
@@ -779,8 +914,11 @@ public class GreetingCardController : MonoBehaviour
         frontWall.gameObject.SetActive(true);
         frontWall.localRotation = wallRot; frontWall.localScale = wallScale;
         door.localRotation = doorRotation;
+        if (fire) fire.Extinguish();
         for (int i = 0; i < kids.Length; i++)
         {
+            kidBusy[i] = false;
+            kidRoutines[i] = null; // Restart already stopped every coroutine
             kids[i].gameObject.SetActive(false); // they're inside; they show up when the house opens
             kids[i].localPosition = kidHomes[i].localPosition;
             kids[i].localRotation = kidHomes[i].localRotation;
@@ -832,7 +970,7 @@ public class GreetingCardController : MonoBehaviour
         return best;
     }
 
-    Vector3 OnCircle(Vector3 center, float a) => center + circleRadius * new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+    Vector3 OnCircle(Vector3 center, float a) => center + flightRadius * new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
     static Vector3 Tangent(float a) => new Vector3(-Mathf.Sin(a), 0, Mathf.Cos(a));
     static Vector3 Flat(Vector3 v) => new Vector3(v.x, 0, v.z);
 
