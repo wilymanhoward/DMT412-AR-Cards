@@ -291,6 +291,36 @@ def hand_bell():
     return out
 
 
+def fire_crackle():
+    """A fireplace: a low warm rumble under lots of random pops and crackles. Loops seamlessly."""
+    dur, n, m = 4.0, int(4.0 * SR), int(0.25 * SR)
+    # rumble: low-passed noise that swells and fades twice per loop; the last m samples are cross-faded
+    # into the first m so there is no jump at the loop point
+    r, y = [], 0.0
+    for i in range(n + m):
+        y += 0.03 * (random.uniform(-1, 1) - y)
+        r.append(0.55 * y * (0.7 + 0.3 * math.sin(2 * math.pi * i / n * 2)))
+    for i in range(m):
+        w = i / m
+        r[i] = r[i] * w + r[n + i] * (1 - w)
+    out = r[:n]
+    # pops: short bursts of noise that die away quickly; about one in five is loud
+    t = 0.0
+    while True:
+        t += random.expovariate(16)
+        if t >= dur:
+            break
+        amp = random.uniform(0.5, 1.0) if random.random() < 0.18 else random.uniform(0.1, 0.4)
+        decay = random.uniform(300, 900)
+        bright = random.uniform(0.3, 0.9)
+        pop, y = [], 0.0
+        for i in range(int(random.uniform(0.008, 0.04) * SR)):
+            y += bright * (random.uniform(-1, 1) - y)
+            pop.append(amp * math.exp(-decay * i / SR) * y)
+        mix(out, pop, t, wrap=True)
+    return out
+
+
 if __name__ == "__main__":
     folder = sys.argv[1]
     os.makedirs(folder, exist_ok=True)
@@ -306,3 +336,4 @@ if __name__ == "__main__":
     write(folder, "whoosh.wav", whoosh(), peak=0.6)
     write(folder, "tree_jingle.wav", tree_tap())
     write(folder, "hand_bell_ring.wav", hand_bell())
+    write(folder, "fire_crackle_loop.wav", fire_crackle(), peak=0.8, fade=False)
