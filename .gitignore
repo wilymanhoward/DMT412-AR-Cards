@@ -24,3 +24,4 @@
 *.aab
 .DS_Store
 Thumbs.db
+/.utmp/

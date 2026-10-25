@@ -22,7 +22,10 @@ public static class ChristmasCardBuilder
 
     // Card is 1 unit wide and 0.71 deep (image target size). Everything below is in card units.
     const float CardHalfW = 0.5f, CardHalfD = 0.354f;
-    const float TreeHeight = 1.5f, GiftHeight = 0.18f, RewardSize = 0.15f, SantaHeight = 0.7f, SleighLength = 1.6f;
+    // One scale for the whole scene, set by the house (6 m wide in the kit → HouseWidth card units).
+    const float HouseWidth = 1.1f, GiftHeight = 0.1f, RewardSize = 0.09f, SantaHeight = 0.36f, KidHeight = 0.22f, SleighLength = 0.9f;
+    const string DemoScene = Ithappy + "Scenes/Built-In_Scenes/Demonstration.unity";
+    const string Boy = "Assets/polyperfect/Poly Christmas/Prefabs/People/Seasons People/Boy_Large_Christmas.prefab";
 
     static readonly Color Red = Hex("C62828"), Green = Hex("1F6B3A"), Gold = Hex("FFC940"), Cream = Hex("FFF8E7");
 
@@ -67,38 +70,47 @@ public static class ChristmasCardBuilder
         var templates = new GameObject("Greeting Templates"); // inactive and outside the target, so Vuforia never shows them
         templates.SetActive(false);
 
-        var tree = BuildTree(content, out var lights, out float treeRadius);
-        var fx = BuildFx(content, treeRadius);
+        var house = BuildHouse(content);
+        var lights = BuildTreeLights(content, house);
+        var fx = BuildFx(content, house);
         var sleigh = BuildSleigh(content, fx, out var bells);
-        var spots = BuildGiftSpots(content, treeRadius);
+        var spots = BuildGiftSpots(content, house);
         var gifts = BuildGiftTemplates(templates.transform, out var goldenGift);
         var rewards = BuildRewards(templates.transform);
         var santa = BuildSanta(content);
-        var santaSpots = BuildSantaSpots(content);
-        var bell = BuildBell(content);
+        var kids = BuildKids(content, house, out var kidHomes);
+        var santaSpots = BuildSantaSpots(content, house);
+        var bell = BuildBell(content, house);
         var ui = BuildUI();
 
         // controller lives outside the target so it keeps running when the card is lost
         var c = new GameObject("Greeting Controller").AddComponent<GreetingCardController>();
         c.arCamera = Object.FindAnyObjectByType<VuforiaBehaviour>().GetComponent<Camera>();
         c.content = content;
-        c.tree = tree;
+        c.house = house.root;
+        c.roof = house.roof;
+        c.frontWall = house.frontWall;
+        c.door = house.door;
+        c.chimneyTop = house.chimneyTop;
+        c.houseHeight = house.height;
+        c.tree = house.tree;
         c.treeLights = lights;
         c.sleigh = sleigh;
         c.santa = santa;
+        c.kids = kids;
+        c.kidHomes = kidHomes;
         c.giftSpots = spots;
+        c.giftDropHeight = (house.wallTop - house.floorY) * 0.85f;
         c.giftTemplates = gifts;
         c.goldenGiftTemplate = goldenGift;
         c.bell = bell;
-        c.santaStand = santaSpots[0];
-        c.goldenSpot = santaSpots[1];
-        c.peekHide = santaSpots[2];
-        c.peekShow = santaSpots[3];
-        c.peekExit = santaSpots[4];
+        c.santaOutside = santaSpots[0];
+        c.santaStand = santaSpots[1];
+        c.goldenSpot = santaSpots[2];
         c.rewards = rewards;
         c.fx = fx;
-        c.circleRadius = treeRadius + SleighLength * 0.3f + 0.1f; // keeps the bigger sleigh clear of the branches
-        c.circleHeight = TreeHeight * 0.65f;
+        c.circleRadius = house.radius + SleighLength * 0.3f + 0.1f; // keeps the sleigh clear of the roof
+        c.circleHeight = house.height * 0.85f;
 
         c.music = NewAudio(c.gameObject, FindClip("music", "song", "carol"), loop: true);
         c.sfx = NewAudio(c.gameObject, null, loop: false);
@@ -155,7 +167,10 @@ public static class ChristmasCardBuilder
         EditorSceneManager.MarkSceneDirty(target.scene);
         EditorSceneManager.SaveScene(target.scene);
         Selection.activeGameObject = content.gameObject;
-        Debug.Log($"GREETING_CARD_BUILT tree footprint radius {treeRadius:F2}, flight radius {c.circleRadius:F2}, " +
+        Debug.Log($"GREETING_CARD_BUILT house {house.pieces} pieces, height {house.height:F2}, radius {house.radius:F2}, " +
+                  $"floor {house.floorY:F2}, wall top {house.wallTop:F2}, front z {house.frontZ:F2}, back z {house.backZ:F2}, " +
+                  $"roof {house.roof.childCount} / front wall {house.frontWall.childCount} pieces, tree radius {house.treeRadius:F2}, " +
+                  $"flight radius {c.circleRadius:F2}, " +
                   $"clips: music={(bool)c.music.clip} bells={(bool)bells.clip} pop={(bool)c.popClip} land={(bool)c.landClip} " +
                   $"sparkle={(bool)c.sparkleClip} rare={(bool)c.rareClip} fireworks={(bool)c.fireworksClip} whoosh={(bool)c.whooshClip} " +
                   $"treeTap={(bool)c.treeTapClip} finale={(bool)c.finaleClip}, font={font.name}, title={titleFont.name}");
@@ -175,40 +190,122 @@ public static class ChristmasCardBuilder
         }
     }
 
-    // ---------------------------------------------------------------- tree
+    // ---------------------------------------------------------------- house
 
-    static Transform BuildTree(Transform content, out TreeLights lights, out float radius)
+    class HouseInfo
     {
-        // ithappy indoor tree + its toys (ornaments and topper star). Both share one origin, so they
-        // are wrapped and scaled together; the height includes the topper.
-        string treePath = Ithappy + "Prefabs/Christmass_tree_indoor_001.prefab";
-        string toysPath = Ithappy + "Prefabs/Christmass_tree_indoor_001_toys.prefab";
-        MakeReadable(treePath); // the twinkle particles spawn on the tree's mesh
-        var tree = Wrap(new[] { treePath, toysPath }, "Tree", Measure.Height, TreeHeight);
-        var b = WorldBounds(tree.gameObject);
-        radius = Mathf.Max(b.size.x, b.size.z) / 2;
-        tree.SetParent(content, false);
+        public Transform root, roof, frontWall, door, doorway, tree, chimneyTop;
+        public float floorY, wallTop, height, radius, frontZ, backZ, halfWidth, treeRadius;
+        public int pieces;
+    }
+
+    // The snowy house, copied with its furnished room from ithappy's demo scene (so the layout is theirs),
+    // scaled to HouseWidth and centred on the card. Its pieces are then grouped so it can open like a
+    // dollhouse: the roof + attic lift off, and the wall facing the camera folds down.
+    static HouseInfo BuildHouse(Transform content)
+    {
+        MakeReadable(Ithappy + "Prefabs/Christmass_tree_indoor_001.prefab"); // the twinkle particles spawn on its mesh
+        var h = new HouseInfo { root = NewChild("House", content), halfWidth = HouseWidth / 2 };
+        var demo = EditorSceneManager.OpenScene(DemoScene, OpenSceneMode.Additive);
+        try
+        {
+            var all = demo.GetRootGameObjects().First(g => g.name == "Demonstration").transform.Cast<Transform>().ToArray();
+            var walls = all.Where(t => t.name.StartsWith("Wall_")).ToArray();
+            var fb = WorldBounds(walls[0].gameObject);
+            foreach (var w in walls) fb.Encapsulate(WorldBounds(w.gameObject));
+            float scale = HouseWidth / fb.size.x;
+            var anchor = new Vector3(fb.center.x, fb.min.y, fb.center.z);
+            foreach (var t in all)
+            {
+                Vector3 p = t.position;
+                bool nearHouse = p.x > fb.min.x - 0.6f && p.x < fb.max.x + 0.6f && p.z > fb.min.z - 0.6f && p.z < fb.max.z + 0.6f;
+                bool keep = t.name.StartsWith("Roof") || (nearHouse && p.y > fb.min.y - 0.5f);
+                if (!keep || t.name.StartsWith("Present_") || t.name.StartsWith("Plantform")) continue; // our own gifts replace theirs
+                var copy = Object.Instantiate(t.gameObject, h.root);
+                copy.name = t.name;
+                copy.transform.localPosition = (p - anchor) * scale;
+                copy.transform.localRotation = t.rotation;
+                copy.transform.localScale = t.lossyScale * scale;
+                h.pieces++;
+            }
+        }
+        finally
+        {
+            EditorSceneManager.CloseScene(demo, true);
+        }
+        foreach (var light in h.root.GetComponentsInChildren<Light>(true)) Object.DestroyImmediate(light); // decorative lamps
+
+        Bounds B(Transform t) => LocalBounds(t.gameObject, content);
+        var pieces = h.root.Cast<Transform>().ToArray();
+        h.floorY = B(pieces.Where(t => t.name.StartsWith("Floor_")).OrderBy(t => t.position.y).First()).max.y;
+        h.wallTop = B(pieces.First(t => t.name == "Wall_003")).max.y;
+        var gables = pieces.Where(t => t.name == "Wall_001" || t.name == "Wall_002").OrderBy(t => B(t).center.z).ToArray();
+        Transform front = gables[0], back = gables[1];
+        h.frontZ = B(front).center.z;
+        h.backZ = B(back).center.z;
+        var hb = B(h.root);
+        h.height = hb.max.y;
+        h.radius = new Vector2(hb.extents.x, hb.extents.z).magnitude;
+
+        // front wall: the wall facing the camera plus everything on it; pivot on its bottom edge so it folds down
+        h.frontWall = NewChild("Front Wall", h.root);
+        h.frontWall.localPosition = new Vector3(0, 0, h.frontZ);
+        foreach (var t in pieces)
+            if (t == front || (t != back && !t.name.StartsWith("Wall_") && B(t).center.z < h.frontZ + 0.05f))
+                t.SetParent(h.frontWall, true);
+
+        // roof: the roof pieces, the attic floor and everything above the room's ceiling (incl. the chimney)
+        h.roof = NewChild("Roof", h.root);
+        h.roof.localPosition = new Vector3(0, h.wallTop, 0);
+        foreach (var t in pieces)
+            if (t.parent == h.root && !t.name.StartsWith("Wall_") && (t.name.StartsWith("Roof") || B(t).center.y > h.wallTop - 0.07f))
+                t.SetParent(h.roof, true);
+
+        var pipe = h.roof.GetComponentsInChildren<Transform>().FirstOrDefault(t => t.name == "Fireplace_pipe_001");
+        var cb = pipe ? B(pipe) : B(h.roof);
+        h.chimneyTop = NewChild("Chimney Top", h.roof);
+        h.chimneyTop.position = content.TransformPoint(new Vector3(cb.center.x, cb.max.y, cb.center.z));
+
+        // the back door Santa comes through, and its doorway
+        h.door = pieces.First(t => t.name.StartsWith("Door_0") && t.parent == h.root);
+        h.doorway = pieces.FirstOrDefault(t => t.name.StartsWith("Doorway") && t.parent == h.root) ?? h.door;
+
+        // the tree and its toys share an origin: one pivot at the base
+        var treeParts = pieces.Where(t => t.name.StartsWith("Christmass_tree_indoor_001") && t.parent == h.root).ToArray();
+        h.tree = NewChild("Tree", h.root);
+        h.tree.position = treeParts[0].position;
+        foreach (var t in treeParts) t.SetParent(h.tree, true);
+        var tb = B(h.tree);
+        h.treeRadius = Mathf.Max(tb.extents.x, tb.extents.z);
+        return h;
+    }
+
+    static TreeLights BuildTreeLights(Transform content, HouseInfo h)
+    {
+        var tree = h.tree;
+        var tb = LocalBounds(tree.gameObject, content);
+        float height = tb.max.y - tree.localPosition.y;
         var treeRenderer = tree.GetChild(0).GetComponentInChildren<MeshRenderer>();
 
         // tap target for "poke the tree"
         var col = tree.gameObject.AddComponent<CapsuleCollider>();
-        col.center = new Vector3(0, TreeHeight / 2, 0);
-        col.height = TreeHeight;
-        col.radius = radius * 0.75f;
+        col.center = new Vector3(0, height / 2, 0);
+        col.height = height;
+        col.radius = h.treeRadius * 0.75f;
 
         // the topper star is part of the toys mesh, so the glow sits on it and pulses
         var star = NewChild("Star Glow", tree);
-        star.localPosition = new Vector3(0, TreeHeight - 0.06f, 0);
+        star.localPosition = new Vector3(0, height - 0.025f, 0);
 
         var twinkles = NewPS("Twinkle Lights", tree, glowMat, local: true);
         var main = twinkles.main;
         main.startLifetime = Range(0.8f, 1.6f);
         main.startSpeed = 0;
-        main.startSize = Range(0.03f, 0.05f);
+        main.startSize = Range(0.012f, 0.02f);
         main.startColor = Colors(Gold, Hex("FF4D4D"), Color.white, Hex("7CFF8A"));
-        main.maxParticles = 70;
+        main.maxParticles = 60;
         var em = twinkles.emission;
-        em.rateOverTime = 35;
+        em.rateOverTime = 30;
         var sh = twinkles.shape;
         sh.shapeType = ParticleSystemShapeType.MeshRenderer;
         sh.meshRenderer = treeRenderer;
@@ -218,7 +315,7 @@ public static class ChristmasCardBuilder
         main = halo.main;
         main.startLifetime = 1.6f;
         main.startSpeed = 0;
-        main.startSize = 0.4f;
+        main.startSize = 0.15f;
         main.startColor = new Color(Gold.r, Gold.g, Gold.b, 0.9f);
         main.maxParticles = 3;
         em = halo.emission;
@@ -229,23 +326,84 @@ public static class ChristmasCardBuilder
         SizeCurve(halo, 0, 0.6f, 0.5f, 1, 1, 0.6f);
         Fade(halo, 0.4f, 0.6f);
 
-        lights = tree.gameObject.AddComponent<TreeLights>();
+        var lights = tree.gameObject.AddComponent<TreeLights>();
         lights.star = star;
         lights.twinkles = twinkles;
         lights.starHalo = halo;
+        lights.spinSpeed = 0; // it's standing in a room now: no spinning, just the little dance
+        lights.bounce = 0.02f;
+        lights.sway = 1.5f;
         lights.enabled = false;
-        tree.gameObject.SetActive(false);
-        return tree;
+        return lights;
+    }
+
+    // Two kids waiting at the front of the room: polyperfect's boy, the second one recoloured blue.
+    static Transform[] BuildKids(Transform content, HouseInfo h, out Transform[] homes)
+    {
+        var controller = CharacterController("Kid",
+            ("Look", "IdleLookAround", true), ("Run", "Run", true), ("Wave", "WaveHello", false), ("Cheer", "Hip_Hop_Dancing_1", true));
+        var homeRoot = NewChild("Kid Homes", content);
+        var at = new[]
+        {
+            new Vector3(-h.halfWidth * 0.45f, h.floorY, h.frontZ + 0.13f),
+            new Vector3(-h.halfWidth * 0.12f, h.floorY, h.frontZ + 0.1f),
+        };
+        var kids = new Transform[at.Length];
+        homes = new Transform[at.Length];
+        for (int i = 0; i < at.Length; i++)
+        {
+            var kid = Wrap(Boy, "Kid " + (i + 1), Measure.Height, KidHeight);
+            kid.SetParent(content, false);
+            kid.localPosition = at[i];
+            kid.localRotation = Quaternion.Euler(0, 180, 0); // facing the camera
+            var anim = kid.GetComponentInChildren<Animator>();
+            anim.runtimeAnimatorController = controller;
+            anim.applyRootMotion = false;
+            if (i == 1) Recolour(kid);
+            homes[i] = NewChild("Home " + (i + 1), homeRoot);
+            homes[i].localPosition = kid.localPosition;
+            homes[i].localRotation = kid.localRotation;
+            kid.gameObject.SetActive(false);
+            kids[i] = kid;
+        }
+        return kids;
+    }
+
+    // The boy uses polyperfect's palette atlas: 32 colour bands of equal height, swatches in the left 20/32.
+    // His clothes use band 11 (green); copying band 13 (blue) over it gives the second kid a blue outfit
+    // while his skin and hair (other bands) stay the same.
+    static void Recolour(Transform kid)
+    {
+        var r = kid.GetComponentInChildren<SkinnedMeshRenderer>();
+        var baseMat = r.sharedMaterial;
+        var tex = new Texture2D(2, 2);
+        tex.LoadImage(File.ReadAllBytes(AssetDatabase.GetAssetPath(baseMat.mainTexture)));
+        int band = tex.height / 32, width = tex.width * 20 / 32;
+        int Y(int fromTop) => tex.height - (fromTop + 1) * band; // texture rows count from the bottom
+        tex.SetPixels(0, Y(11), width, band, tex.GetPixels(0, Y(13), width, band));
+        string texPath = Gen + "Kid2_Palette.png";
+        File.WriteAllBytes(texPath, tex.EncodeToPNG());
+        Object.DestroyImmediate(tex);
+        AssetDatabase.ImportAsset(texPath);
+        var importer = (TextureImporter)AssetImporter.GetAtPath(texPath);
+        importer.maxTextureSize = 4096;
+        importer.SaveAndReimport();
+
+        string matPath = Gen + "Kid2.mat";
+        AssetDatabase.DeleteAsset(matPath);
+        var mat = new Material(baseMat) { mainTexture = Load<Texture2D>(texPath) };
+        AssetDatabase.CreateAsset(mat, matPath);
+        r.sharedMaterials = r.sharedMaterials.Select(m => m == baseMat ? mat : m).ToArray();
     }
 
     // ---------------------------------------------------------------- effects
 
-    static FxLibrary BuildFx(Transform content, float treeRadius)
+    static FxLibrary BuildFx(Transform content, HouseInfo h)
     {
         var root = NewChild("FX", content);
         var fx = root.gameObject.AddComponent<FxLibrary>();
 
-        // sparkle ring on the card around the tree base, drifting up while the tree rises
+        // sparkle ring on the card around the house, drifting up while it rises
         var ring = NewPS("Sparkle Ring", root, sparkleMat, local: true);
         var main = ring.main;
         main.startLifetime = Range(0.6f, 1.2f);
@@ -258,7 +416,7 @@ public static class ChristmasCardBuilder
         em.rateOverTime = 70;
         var sh = ring.shape;
         sh.shapeType = ParticleSystemShapeType.Circle;
-        sh.radius = treeRadius + 0.04f;
+        sh.radius = h.radius * 0.8f;
         sh.radiusThickness = 0;
         sh.rotation = new Vector3(90, 0, 0);
         var vel = ring.velocityOverLifetime;
@@ -268,7 +426,7 @@ public static class ChristmasCardBuilder
         SizeCurve(ring, 0, 0, 0.3f, 1, 1, 0);
         fx.sparkleRing = ring;
 
-        // gold glitter fountain rising with the tree
+        // gold glitter fountain rising with the house
         var glitter = NewPS("Gold Glitter", root, sparkleMat, local: true);
         main = glitter.main;
         main.startLifetime = Range(0.8f, 1.4f);
@@ -283,14 +441,14 @@ public static class ChristmasCardBuilder
         sh = glitter.shape;
         sh.shapeType = ParticleSystemShapeType.Cone;
         sh.angle = 18;
-        sh.radius = treeRadius * 0.6f;
+        sh.radius = h.halfWidth * 0.6f;
         sh.rotation = new Vector3(-90, 0, 0);
         Fade(glitter, 0.1f, 0.6f);
         fx.glitter = glitter;
 
         // light snowfall over the card
         var snow = NewPS("Snowfall", root, softMat, local: true);
-        snow.transform.localPosition = new Vector3(0, TreeHeight + 0.45f, 0);
+        snow.transform.localPosition = new Vector3(0, h.height + 0.3f, 0);
         main = snow.main;
         main.startLifetime = 6f;
         main.startSpeed = 0.2f;
@@ -302,7 +460,7 @@ public static class ChristmasCardBuilder
         sh = snow.shape;
         sh.shapeType = ParticleSystemShapeType.Box;
         sh.rotation = new Vector3(90, 0, 0); // box emits along its Z; this points it down
-        sh.scale = new Vector3(1.3f, 0.9f, 0.01f);
+        sh.scale = new Vector3(1.6f, 1.3f, 0.01f);
         var noise = snow.noise;
         noise.enabled = true;
         noise.strength = 0.05f;
@@ -399,6 +557,7 @@ public static class ChristmasCardBuilder
 
         // golden stars swirling up around the tree once it's lit
         var orbit = NewPS("Orbit Stars", root, sparkleMat, local: true);
+        orbit.transform.localPosition = h.tree.localPosition;
         main = orbit.main;
         main.startLifetime = Range(3f, 4f);
         main.startSpeed = 0;
@@ -410,7 +569,7 @@ public static class ChristmasCardBuilder
         em.rateOverTime = 18;
         sh = orbit.shape;
         sh.shapeType = ParticleSystemShapeType.Circle;
-        sh.radius = treeRadius + 0.15f;
+        sh.radius = h.treeRadius + 0.06f;
         sh.radiusThickness = 0;
         sh.rotation = new Vector3(90, 0, 0);
         vel = orbit.velocityOverLifetime;
@@ -425,7 +584,7 @@ public static class ChristmasCardBuilder
 
         // finale: confetti raining down over the whole card
         var rain = NewPS("Confetti Rain", root, confettiMat, local: true);
-        rain.transform.localPosition = new Vector3(0, TreeHeight + 0.4f, 0);
+        rain.transform.localPosition = new Vector3(0, h.height + 0.3f, 0);
         main = rain.main;
         main.startLifetime = 3.5f;
         main.startSpeed = Range(0.1f, 0.25f);
@@ -475,6 +634,29 @@ public static class ChristmasCardBuilder
         vel.orbitalY = 4f; // tight, fast spiral
         SizeCurve(swirl, 0, 0, 0.2f, 1, 0.8f, 1, 1, 0);
         fx.magicSwirl = swirl;
+
+        // chimney smoke: rides on the roof, so it leaves with it in the reveal
+        var smoke = NewPS("Chimney Smoke", h.chimneyTop, softMat, local: false);
+        main = smoke.main;
+        main.startLifetime = Range(2f, 3f);
+        main.startSpeed = Range(0.06f, 0.12f);
+        main.startSize = Range(0.04f, 0.07f);
+        main.startColor = new Color(0.92f, 0.92f, 0.95f, 0.6f);
+        main.maxParticles = 60;
+        em = smoke.emission;
+        em.rateOverTime = 8;
+        sh = smoke.shape;
+        sh.shapeType = ParticleSystemShapeType.Cone;
+        sh.angle = 12;
+        sh.radius = 0.02f;
+        sh.rotation = new Vector3(-90, 0, 0);
+        noise = smoke.noise;
+        noise.enabled = true;
+        noise.strength = 0.03f;
+        noise.frequency = 0.6f;
+        SizeCurve(smoke, 0, 0.5f, 1, 2f);
+        Fade(smoke, 0.1f, 0.5f);
+        fx.chimneySmoke = smoke;
 
         return fx;
     }
@@ -529,21 +711,21 @@ public static class ChristmasCardBuilder
 
     // ---------------------------------------------------------------- gifts & rewards
 
-    static Transform[] BuildGiftSpots(Transform content, float treeRadius)
+    // Three spots on the floor around the tree, on the side facing the middle of the room, kept inside the walls.
+    static Transform[] BuildGiftSpots(Transform content, HouseInfo h)
     {
-        // The big tree fills the middle of the card, so the gifts take the corners, which are furthest from
-        // the trunk: front-left, back-left, back-right. (Front-right is the finale Santa's.) Drag to fine-tune.
-        float gx = CardHalfW - GiftHeight * 0.6f, gz = CardHalfD - GiftHeight * 0.6f;
-        var positions = new[] { new Vector3(-gx, 0, -gz), new Vector3(-gx, 0, gz), new Vector3(gx, 0, gz) };
-        float clearance = new Vector2(gx, gz).magnitude - GiftHeight * 0.5f;
-        if (treeRadius > clearance)
-            Debug.LogWarning($"Tree footprint (radius {treeRadius:F2}) reaches the corner gifts ({clearance:F2}); they will tuck under the lowest branches.");
-
         var root = NewChild("Gift Spots", content);
-        return positions.Select((p, i) =>
+        Vector3 tree = h.tree.localPosition;
+        Vector3 toRoom = Vector3.ProjectOnPlane(-tree, Vector3.up); // the room's middle is the house origin
+        toRoom = toRoom.sqrMagnitude > 1e-6f ? toRoom.normalized : Vector3.back;
+        float r = h.treeRadius + GiftHeight * 0.8f;
+        return new[] { -55f, 0f, 55f }.Select((angle, i) =>
         {
+            Vector3 p = tree + Quaternion.Euler(0, angle, 0) * toRoom * r;
+            p.x = Mathf.Clamp(p.x, -h.halfWidth + GiftHeight, h.halfWidth - GiftHeight);
+            p.z = Mathf.Clamp(p.z, h.frontZ + GiftHeight * 0.8f, h.backZ - GiftHeight);
             var spot = NewChild("Spot " + (i + 1), root);
-            spot.localPosition = p;
+            spot.localPosition = new Vector3(p.x, h.floorY, p.z);
             return spot;
         }).ToArray();
     }
@@ -671,20 +853,24 @@ public static class ChristmasCardBuilder
         return santa;
     }
 
-    // One state per move; the controller cross-fades between them by name.
-    // Clips aren't set to loop, so Look, Walk and Dance restart themselves at the end.
-    static AnimatorController SantaController()
+    static AnimatorController SantaController() => CharacterController("Santa",
+        ("Look", "IdleLookAround", true), ("Walk", "WalkWithItem", true), ("Wave", "WaveHello", false),
+        ("Talk", "TalkGestureActive", false), ("Dance", "DanceIdle", true));
+
+    // One state per move (the first is the default); the controllers cross-fade between them by name.
+    // Uses the ithappy Santa clips, which are Humanoid, so they also play on the kids.
+    // Clips aren't set to loop, so looping states restart themselves at the end.
+    static AnimatorController CharacterController(string name, params (string state, string clip, bool loop)[] states)
     {
-        string path = Gen + "Santa.controller";
+        string path = Gen + name + ".controller";
         AssetDatabase.DeleteAsset(path);
         AssetDatabase.DeleteAsset(Gen + "FinaleSanta.controller"); // old name
         var controller = AnimatorController.CreateAnimatorControllerAtPath(path);
         var sm = controller.layers[0].stateMachine;
-        const string clips = Ithappy + "Animations/Other_Animations/Santa_";
-        AnimatorState State(string name, string clip, bool loop)
+        foreach (var (stateName, clip, loop) in states)
         {
-            var state = sm.AddState(name);
-            state.motion = Load<AnimationClip>(clips + clip + ".anim");
+            var state = sm.AddState(stateName);
+            state.motion = Load<AnimationClip>(Ithappy + "Animations/Other_Animations/Santa_" + clip + ".anim");
             if (loop)
             {
                 var again = state.AddTransition(state);
@@ -692,30 +878,21 @@ public static class ChristmasCardBuilder
                 again.exitTime = 0.95f;
                 again.duration = 0.15f;
             }
-            return state;
+            if (sm.defaultState == null) sm.defaultState = state;
         }
-        sm.defaultState = State("Look", "IdleLookAround", true);
-        State("Walk", "WalkWithItem", true);
-        State("Wave", "WaveHello", false);
-        State("Talk", "TalkGestureActive", false);
-        State("Flip", "Running_Forward_Flip", false);
-        State("Dance", "DanceIdle", true);
         return controller;
     }
 
-    // Where Santa walks in from and stops, where the golden present lands, and the peek path.
-    // He appears in front of the tree, just past the card's front edge so the branches don't cut through him,
-    // and the golden present lands beside him. Drag the spots in the scene to adjust.
-    static Transform[] BuildSantaSpots(Transform content)
+    // Santa appears just outside the back door, walks in through it, and the golden present lands in front of him.
+    static Transform[] BuildSantaSpots(Transform content, HouseInfo h)
     {
         var root = NewChild("Santa Spots", content);
+        float doorX = LocalBounds(h.doorway.gameObject, content).center.x;
         var spots = new[]
         {
-            ("Stand", new Vector3(0, 0, -(CardHalfD + 0.16f))),            // centred, in front of the tree
-            ("Golden Present", new Vector3(0.24f, 0, -(CardHalfD + 0.1f))), // beside him, toward the camera
-            ("Peek Hide", new Vector3(0.15f, 0, 0.32f)),                   // behind the tree
-            ("Peek Show", new Vector3(0.52f, 0, -0.02f)),                  // just right of the tree
-            ("Peek Exit", new Vector3(1.1f, 0, 0.6f)),
+            ("Outside Door", new Vector3(doorX, 0, h.backZ + 0.18f)),
+            ("Stand", new Vector3(doorX, h.floorY, h.backZ - 0.22f)),
+            ("Golden Present", new Vector3(doorX + 0.06f, h.floorY, h.backZ - 0.36f)),
         };
         return spots.Select(spot =>
         {
@@ -725,12 +902,13 @@ public static class ChristmasCardBuilder
         }).ToArray();
     }
 
-    // A golden hand bell hanging in front of the tree; its pivot is at the top so it swings.
-    static Transform BuildBell(Transform content)
+    // A golden hand bell hanging inside, next to the back door; its pivot is at the top so it swings.
+    static Transform BuildBell(Transform content, HouseInfo h)
     {
-        const float size = 0.18f;
+        const float size = 0.08f;
         var hanger = NewChild("Call Bell", content);
-        hanger.localPosition = new Vector3(0.2f, 0.65f, -0.4f);
+        float doorX = LocalBounds(h.doorway.gameObject, content).center.x;
+        hanger.localPosition = new Vector3(doorX + 0.17f, h.floorY + (h.wallTop - h.floorY) * 0.7f, h.backZ - 0.05f);
         var bell = Wrap(Poly + "Bell_A_Christmas.prefab", "Bell", Measure.Height, size);
         bell.SetParent(hanger, false);
         bell.localPosition = new Vector3(0, -size, 0);
@@ -1419,6 +1597,15 @@ public static class ChristmasCardBuilder
         var b = rs[0].bounds;
         foreach (var r in rs) b.Encapsulate(r.bounds);
         return b;
+    }
+
+    // Bounds in `space` coordinates (content has no rotation or scale, so only the centre moves).
+    static Bounds LocalBounds(GameObject go, Transform space)
+    {
+        bool hasRenderer = go.GetComponentsInChildren<Renderer>().Any(r => !(r is ParticleSystemRenderer));
+        if (!hasRenderer) return new Bounds(space.InverseTransformPoint(go.transform.position), Vector3.zero);
+        var b = WorldBounds(go);
+        return new Bounds(space.InverseTransformPoint(b.center), b.size);
     }
 
     static void MakeReadable(string prefabPath)

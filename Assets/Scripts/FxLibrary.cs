@@ -12,6 +12,7 @@ public class FxLibrary : MonoBehaviour
     public ParticleSystem orbitStars;  // golden stars swirling around the tree once it's up
     public ParticleSystem confettiRain; // finale
     public ParticleSystem magicSwirl;   // golden spiral where Santa appears (move it, then Play)
+    public ParticleSystem chimneySmoke; // rises from the chimney while the house is closed
 
     [Header("Bursts (world space)")]
     public ParticleSystem snowPuff;
@@ -48,7 +49,7 @@ public class FxLibrary : MonoBehaviour
 
     public void StopAll()
     {
-        foreach (var ps in new[] { sparkleRing, glitter, snowfall, trail, orbitStars, confettiRain, magicSwirl, snowPuff, confetti, sparkle, rareBurst, firework })
+        foreach (var ps in new[] { sparkleRing, glitter, snowfall, trail, orbitStars, confettiRain, magicSwirl, chimneySmoke, snowPuff, confetti, sparkle, rareBurst, firework })
             ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
     }
 

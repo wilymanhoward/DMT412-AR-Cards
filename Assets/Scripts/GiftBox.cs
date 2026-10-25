@@ -12,6 +12,7 @@ public class GiftBox : MonoBehaviour
 
     [HideInInspector] public GreetingCardController controller;
     public bool Opened { get; private set; }
+    public bool Claimed { get; set; } // a kid is already on the way to open it
 
     bool ready;
     float nextShake;
@@ -79,7 +80,7 @@ public class GiftBox : MonoBehaviour
         controller.fx.Confetti(top);
         controller.fx.Sparkle(top);
         yield return new WaitForSeconds(0.1f);
-        controller.ReleaseReward(top, golden);
+        controller.ReleaseReward(this, top);
     }
 
     IEnumerator PopLid()
