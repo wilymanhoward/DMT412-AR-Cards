@@ -37,7 +37,8 @@ public class GreetingCardController : MonoBehaviour
     public float houseHeight = 1.5f;
     public Transform tree;         // inside the house, pivot at its base
     public TreeLights treeLights;
-    public Transform sleigh;       // pivot at its centre, reindeer facing +Z
+    public float treeSpinSpeed = 15f; // degrees per second; applied at start, so it overrides what the scene was built with
+    public Transform sleigh;      // pivot at its centre, reindeer facing +Z
     public Transform santa;
     public Transform[] kids;
     public Transform[] kidHomes;   // where the kids wait when they aren't busy
@@ -71,6 +72,7 @@ public class GreetingCardController : MonoBehaviour
     public AudioClip popClip, landClip, sparkleClip, rareClip, fireworksClip, whooshClip, treeTapClip;
     public AudioClip finaleClip;   // plays once in the finale, then the main music returns
     public AudioClip bellClip;
+    public AudioClip santaClip;    // "Ho ho ho, Merry Christmas!"; loaded from Resources if not assigned
     [Range(0, 1)] public float musicVolume = 0.6f;
 
     [Header("UI")]
@@ -107,11 +109,16 @@ public class GreetingCardController : MonoBehaviour
     bool[] kidBusy;            // on the way to a gift or opening it
     Coroutine[] kidRoutines;   // reacting / walking home; cancelled when the kid is needed again
     FireCrackle fire;
+    readonly List<Reward> found = new List<Reward>(); // everything opened so far, for the recap
+    Transform recapRow;                                // tiles are added here when the finale starts
+    GameObject guideBanner;                            // hidden in the finale
+    readonly List<RenderTexture> recapPictures = new List<RenderTexture>();
 
     void Awake()
     {
         Application.targetFrameRate = 60;
         treeRotation = tree.localRotation;
+        treeLights.spinSpeed = treeSpinSpeed;
         doorRotation = door.localRotation;
         santaScale = santa.localScale;
         santaAnim = santa.GetComponentInChildren<Animator>();
@@ -119,6 +126,9 @@ public class GreetingCardController : MonoBehaviour
         kidBusy = new bool[kids.Length];
         kidRoutines = new Coroutine[kids.Length];
         fire = FireCrackle.Create(house, fx.sparkle.GetComponent<ParticleSystemRenderer>().sharedMaterial);
+        if (!santaClip) santaClip = Resources.Load<AudioClip>("santa_ho_ho_ho"); // Assets/Resources: no scene wiring needed
+        guideBanner = guideText.transform.parent.gameObject;
+        BuildRecap();
         bellScale = bell.localScale;
         roofPos = roof.localPosition; roofRot = roof.localRotation; roofScale = roof.localScale;
         wallRot = frontWall.localRotation; wallScale = frontWall.localScale;
@@ -581,6 +591,7 @@ public class GreetingCardController : MonoBehaviour
     {
         bool golden = box.golden;
         var reward = golden ? PickRare() : PickReward(); // Santa's golden present is always rare
+        found.Add(reward);
         box.RewardRare = reward.rare || golden; // the kids react to this
         box.RewardShown = true;
         var go = Instantiate(reward.prefab, content);
@@ -785,6 +796,11 @@ public class GreetingCardController : MonoBehaviour
         PlaySfx(rareClip, 0.8f);
         Haptics.Buzz(60, Haptics.Medium);
         santaAnim.CrossFade("Wave", 0.05f);
+        if (santaClip) // "Ho ho ho, Merry Christmas!": the carol ducks under his voice
+        {
+            PlaySfx(santaClip, 1f);
+            StartCoroutine(DuckMusic(Mathf.Min(santaClip.length, 8f)));
+        }
 
         yield return Ease.Run(0.7f, t =>
         {
@@ -803,6 +819,7 @@ public class GreetingCardController : MonoBehaviour
     {
         yield return new WaitForSeconds(0.8f);
         SetState(State.Finished);
+        StartCoroutine(ShowRecap());
         StopKidRoutines();
         treeLights.Jiggle(1.5f); // the tree celebrates too
         fx.confettiRain.Play();
@@ -832,7 +849,6 @@ public class GreetingCardController : MonoBehaviour
         yield return Ease.Run(0.3f, t => santa.localRotation = Quaternion.Slerp(from, toCamera, Ease.OutCubic(t)));
         santaAnim.CrossFade("Wave", 0.25f);
         foreach (var anim in kidAnims) anim.CrossFade("Wave", 0.25f);
-        guideText.text = "Bye bye, Santa!";
         PlaySfx(bellClip ? bellClip : sparkleClip, 0.7f);
         yield return new WaitForSeconds(2.8f);
 
@@ -850,7 +866,6 @@ public class GreetingCardController : MonoBehaviour
         // the door closes behind him and the kids go back to cheering
         yield return Ease.Run(0.7f, t => door.localRotation = doorRotation * Quaternion.Euler(0, -100f * (1 - Ease.InOutSine(t)), 0));
         foreach (var anim in kidAnims) anim.CrossFade("Cheer", 0.3f);
-        guideText.text = "See you next Christmas!";
     }
 
     // Fade the carol out, play the finale tune once, then bring the carol back.
@@ -870,6 +885,192 @@ public class GreetingCardController : MonoBehaviour
         yield return FadeAudio(music, 0, musicVolume, 2f, true);
     }
 
+    // ---------- Recap ----------
+
+    static readonly Color RecapGreen = new Color(0.1f, 0.38f, 0.2f), RecapGold = new Color(1f, 0.79f, 0.25f);
+
+    // The "You found:" panel under the Merry Christmas title, with an empty row that fills with a pop-up tile
+    // per gift in the finale. Built here, copying the reward tag's look, so the scene doesn't need rebuilding.
+    void BuildRecap()
+    {
+        var tag = labelTemplate.GetComponent<Image>();
+        var panel = new GameObject("Recap Panel", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
+        panel.SetParent(finishScreen.transform, false);
+        panel.anchorMin = panel.anchorMax = new Vector2(0.5f, 1);
+        // the title and its snowflakes (built at -330) move up now that the banner is gone
+        foreach (RectTransform child in finishScreen.transform)
+            if (child.name == "Text" || child.name == "Snowflake") child.anchoredPosition += new Vector2(0, 80);
+        panel.anchoredPosition = new Vector2(0, -540);
+        panel.sizeDelta = new Vector2(940, 380);
+        var image = panel.GetComponent<Image>();
+        image.sprite = tag.sprite;
+        image.type = Image.Type.Sliced;
+        image.color = new Color(0.04f, 0.18f, 0.1f, 0.92f);
+        image.raycastTarget = false;
+        var rim = panel.gameObject.AddComponent<Outline>();
+        rim.effectColor = RecapGold;
+        rim.effectDistance = new Vector2(5, -5);
+        panel.gameObject.AddComponent<UIPopIn>();
+
+        var header = MakeText("Header", panel, "You found:", 44, FontStyle.Bold, Color.white);
+        header.rectTransform.anchorMin = new Vector2(0, 1);
+        header.rectTransform.anchorMax = new Vector2(1, 1);
+        header.rectTransform.pivot = new Vector2(0.5f, 1);
+        header.rectTransform.anchoredPosition = new Vector2(0, -14);
+        header.rectTransform.sizeDelta = new Vector2(0, 58);
+
+        var row = new GameObject("Row", typeof(RectTransform), typeof(HorizontalLayoutGroup)).GetComponent<RectTransform>();
+        row.SetParent(panel, false);
+        row.anchorMin = Vector2.zero;
+        row.anchorMax = Vector2.one;
+        row.offsetMin = new Vector2(20, 16);
+        row.offsetMax = new Vector2(-20, -78);
+        var layout = row.GetComponent<HorizontalLayoutGroup>();
+        layout.childAlignment = TextAnchor.MiddleCenter;
+        layout.spacing = 20;
+        layout.childControlWidth = layout.childControlHeight = true;
+        layout.childForceExpandWidth = layout.childForceExpandHeight = false;
+        recapRow = row;
+    }
+
+    // One pop-up tile per different gift, one after another: a picture of the gift, its name, and for rare
+    // finds a gold rim, a spinning snowflake and "(RARE!)". Repeats are counted ("x2").
+    IEnumerator ShowRecap()
+    {
+        ClearRecap();
+        var order = new List<Reward>();
+        var counts = new Dictionary<string, int>();
+        foreach (var reward in found)
+        {
+            if (!counts.ContainsKey(reward.name)) { counts[reward.name] = 0; order.Add(reward); }
+            counts[reward.name]++;
+        }
+
+        var tiles = new List<RectTransform>();
+        foreach (var reward in order) tiles.Add(MakeTile(reward, counts[reward.name]));
+        yield return new WaitForSeconds(1f); // the title lands first
+        for (int i = 0; i < tiles.Count; i++)
+        {
+            StartCoroutine(PopTile(tiles[i], order[i].rare));
+            yield return new WaitForSeconds(0.5f);
+        }
+    }
+
+    RectTransform MakeTile(Reward reward, int count)
+    {
+        var tag = labelTemplate.GetComponent<Image>();
+        var tile = new GameObject("Tile " + reward.name, typeof(RectTransform), typeof(Image), typeof(LayoutElement)).GetComponent<RectTransform>();
+        tile.SetParent(recapRow, false);
+        var size = tile.GetComponent<LayoutElement>();
+        size.preferredWidth = 200;
+        size.preferredHeight = 270;
+        tile.localScale = Vector3.zero; // pops in later
+        var image = tile.GetComponent<Image>();
+        image.sprite = tag.sprite;
+        image.type = Image.Type.Sliced;
+        image.color = RecapGreen;
+        image.raycastTarget = false;
+        var rim = tile.gameObject.AddComponent<Outline>();
+        rim.effectColor = reward.rare ? RecapGold : new Color(1, 1, 1, 0.3f);
+        rim.effectDistance = reward.rare ? new Vector2(6, -6) : new Vector2(3, -3);
+
+        // the picture: the 3D gift, drawn on the tile's own colour so the edges blend in
+        var texture = RewardPicture.Render(reward.prefab, RecapGreen);
+        recapPictures.Add(texture);
+        var picture = new GameObject("Picture", typeof(RectTransform), typeof(RawImage)).GetComponent<RectTransform>();
+        picture.SetParent(tile, false);
+        picture.anchorMin = new Vector2(0, 1);
+        picture.anchorMax = new Vector2(1, 1);
+        picture.pivot = new Vector2(0.5f, 1);
+        picture.anchoredPosition = new Vector2(0, -12);
+        picture.sizeDelta = new Vector2(-24, 176);
+        var raw = picture.GetComponent<RawImage>();
+        raw.texture = texture;
+        raw.raycastTarget = false;
+
+        string name = count > 1 ? reward.name + " x" + count : reward.name;
+        var label = MakeText("Name", tile, reward.rare ? name + "\n(RARE!)" : name, 30, FontStyle.Bold,
+                             reward.rare ? new Color(1f, 0.84f, 0.3f) : Color.white);
+        label.rectTransform.anchorMin = new Vector2(0, 0);
+        label.rectTransform.anchorMax = new Vector2(1, 0);
+        label.rectTransform.pivot = new Vector2(0.5f, 0);
+        label.rectTransform.anchoredPosition = new Vector2(0, 6);
+        label.rectTransform.sizeDelta = new Vector2(-16, 70);
+        label.resizeTextForBestFit = true; // long names shrink to fit
+        label.resizeTextMinSize = 18;
+        label.resizeTextMaxSize = 30;
+
+        if (reward.rare)
+        {
+            var flake = finishScreen.GetComponentInChildren<Image>(true); // the finale's own snowflake sprite
+            foreach (var candidate in finishScreen.GetComponentsInChildren<Image>(true))
+                if (candidate.gameObject.name == "Snowflake") { flake = candidate; break; }
+            var badge = new GameObject("Rare Badge", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
+            badge.SetParent(tile, false);
+            badge.anchorMin = badge.anchorMax = new Vector2(1, 1);
+            badge.anchoredPosition = new Vector2(-18, -18);
+            badge.sizeDelta = new Vector2(62, 62);
+            var badgeImage = badge.GetComponent<Image>();
+            badgeImage.sprite = flake.sprite;
+            badgeImage.color = RecapGold;
+            badgeImage.raycastTarget = false;
+            var spin = badge.gameObject.AddComponent<UIPulse>();
+            spin.rotateSpeed = 70;
+            spin.scaleAmount = 0.15f;
+            spin.speed = 4f;
+        }
+        return tile;
+    }
+
+    // Pops in with an overshoot and a little wobble, with a sound and a buzz (bigger for rare finds).
+    IEnumerator PopTile(RectTransform tile, bool rare)
+    {
+        PlaySfx(rare ? rareClip : popClip, rare ? 0.8f : 0.7f);
+        Haptics.Buzz(rare ? 40 : 20, rare ? Haptics.Medium : Haptics.Light);
+        yield return Ease.Run(0.5f, t =>
+        {
+            tile.localScale = Vector3.one * Ease.OutBack(t, 2.4f);
+            tile.localRotation = Quaternion.Euler(0, 0, 10f * (1 - t) * Mathf.Sin(t * 14f));
+        });
+        tile.localScale = Vector3.one;
+        tile.localRotation = Quaternion.identity;
+    }
+
+    // Removes the tiles and frees their pictures (Play Again / restart).
+    void ClearRecap()
+    {
+        if (!recapRow) return;
+        for (int i = recapRow.childCount - 1; i >= 0; i--) Destroy(recapRow.GetChild(i).gameObject);
+        foreach (var texture in recapPictures) if (texture) { texture.Release(); Destroy(texture); }
+        recapPictures.Clear();
+    }
+
+    Text MakeText(string name, Transform parent, string text, int size, FontStyle style, Color color)
+    {
+        var t = new GameObject(name, typeof(RectTransform), typeof(Text)).GetComponent<Text>();
+        t.transform.SetParent(parent, false);
+        t.text = text;
+        t.font = guideText.font;
+        t.fontSize = size;
+        t.fontStyle = style;
+        t.color = color;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.raycastTarget = false;
+        var outline = t.gameObject.AddComponent<Outline>();
+        outline.effectColor = new Color(0.04f, 0.16f, 0.08f);
+        outline.effectDistance = new Vector2(2, -2);
+        return t;
+    }
+
+    // The carol dips while Santa speaks, then swells back.
+    IEnumerator DuckMusic(float seconds)
+    {
+        float from = music.volume, low = musicVolume * 0.35f;
+        yield return Ease.Run(0.25f, t => music.volume = Mathf.Lerp(from, low, t));
+        yield return new WaitForSeconds(seconds);
+        yield return Ease.Run(0.6f, t => music.volume = Mathf.Lerp(low, musicVolume, t));
+    }
+
     // ---------- Helpers ----------
 
     void SetState(State s)
@@ -880,6 +1081,7 @@ public class GreetingCardController : MonoBehaviour
         getGiftButton.gameObject.SetActive(s == State.HouseUp || s == State.SantaArriving);
         getGiftButton.interactable = s == State.HouseUp && houseReady;
         finishScreen.SetActive(s == State.Finished);
+        guideBanner.SetActive(s != State.Finished); // the finale is all about the recap
         spiritMeter.SetActive(s == State.BellReady);
 
         int left = giftSpots.Length - giftsOpened;
@@ -905,6 +1107,8 @@ public class GreetingCardController : MonoBehaviour
         foreach (var go in spawned) if (go) Destroy(go);
         spawned.Clear();
         giftsLanded = giftsOpened = 0;
+        found.Clear();
+        ClearRecap();
         houseReady = revealed = false;
         treeLights.enabled = false;
         tree.localRotation = treeRotation;
