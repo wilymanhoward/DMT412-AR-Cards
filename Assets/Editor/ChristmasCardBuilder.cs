@@ -330,8 +330,7 @@ public static class ChristmasCardBuilder
         lights.star = star;
         lights.twinkles = twinkles;
         lights.starHalo = halo;
-        lights.spinSpeed = 0; // it's standing in a room now: no spinning, just the little dance
-        lights.bounce = 0.02f;
+        lights.bounce = 0.02f; // gentler than in the open: it's standing in a room (spin stays at the default 15 deg/s)
         lights.sway = 1.5f;
         lights.enabled = false;
         return lights;

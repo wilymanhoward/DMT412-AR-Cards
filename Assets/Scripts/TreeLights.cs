@@ -16,7 +16,8 @@ public class TreeLights : MonoBehaviour
 
     readonly List<Material> glowing = new List<Material>();
     readonly List<Color> glowColours = new List<Color>();
-    Vector3 starScale;
+    Vector3 starScale, baseScale = Vector3.one;
+    Quaternion baseRotation = Quaternion.identity; // how the tree is placed; the spin and sway are added to it
     float yaw, jiggleStart = -10f, jiggleStrength;
     Vector2 jiggleDir;
 
@@ -47,6 +48,8 @@ public class TreeLights : MonoBehaviour
     void OnEnable()
     {
         yaw = 0;
+        baseRotation = transform.localRotation;
+        baseScale = transform.localScale;
         twinkles.Play();
         starHalo.Play();
     }
@@ -56,7 +59,7 @@ public class TreeLights : MonoBehaviour
         twinkles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         starHalo.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         star.localScale = starScale;
-        transform.localScale = Vector3.one;
+        transform.localScale = baseScale;
     }
 
     void Update()
@@ -71,11 +74,11 @@ public class TreeLights : MonoBehaviour
         float j = t - jiggleStart;
         float wobble = j < 1.5f ? jiggleStrength * Mathf.Exp(-4 * j) * Mathf.Sin(j * 22f) : 0;
         squash += 0.12f * wobble;
-        transform.localScale = new Vector3(1 + squash * 0.5f, 1 - squash, 1 + squash * 0.5f);
+        transform.localScale = Vector3.Scale(baseScale, new Vector3(1 + squash * 0.5f, 1 - squash, 1 + squash * 0.5f));
 
         // slow sway plus the wobble's lean, applied on top of the spin
         Vector2 tilt = new Vector2(Mathf.Sin(t * 1.3f), Mathf.Sin(t * 0.9f)) * sway + jiggleDir * (8f * wobble);
-        transform.localRotation = Quaternion.Euler(tilt.x, 0, tilt.y) * Quaternion.Euler(0, yaw, 0);
+        transform.localRotation = Quaternion.Euler(tilt.x, 0, tilt.y) * baseRotation * Quaternion.Euler(0, yaw, 0);
 
         for (int i = 0; i < glowing.Count; i++)
             glowing[i].SetColor("_EmissionColor", glowColours[i] * (0.4f + 1.2f * Mathf.PerlinNoise(t * 4f, i * 1.7f)));
