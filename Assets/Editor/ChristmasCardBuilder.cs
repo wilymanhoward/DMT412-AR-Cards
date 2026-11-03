@@ -859,7 +859,7 @@ public static class ChristmasCardBuilder
     // One state per move (the first is the default); the controllers cross-fade between them by name.
     // Uses the ithappy Santa clips, which are Humanoid, so they also play on the kids.
     // Clips aren't set to loop, so looping states restart themselves at the end.
-    static AnimatorController CharacterController(string name, params (string state, string clip, bool loop)[] states)
+    internal static AnimatorController CharacterController(string name, params (string state, string clip, bool loop)[] states)
     {
         string path = Gen + name + ".controller";
         AssetDatabase.DeleteAsset(path);
@@ -1271,7 +1271,7 @@ public static class ChristmasCardBuilder
 
     // ---------------------------------------------------------------- generated textures & materials
 
-    static void MakeAssets()
+    internal static void MakeAssets()
     {
         if (!AssetDatabase.IsValidFolder("Assets/Generated")) AssetDatabase.CreateFolder("Assets", "Generated");
         var star = Load<Texture2D>(MakeTexture("FX_Star", 128, StarAlpha, false));
@@ -1305,7 +1305,7 @@ public static class ChristmasCardBuilder
         AssetDatabase.SaveAssets();
     }
 
-    static Material MakeMaterial(string name, string shaderName, Texture tex)
+    internal static Material MakeMaterial(string name, string shaderName, Texture tex)
     {
         string path = Gen + name + ".mat";
         var shader = Shader.Find(shaderName) ?? throw new System.Exception("Missing shader: " + shaderName);
@@ -1548,16 +1548,16 @@ public static class ChristmasCardBuilder
 
     // ---------------------------------------------------------------- model helpers
 
-    enum Measure { Height, Length, Largest }
+    internal enum Measure { Height, Length, Largest }
 
-    static Transform Wrap(string path, string name, Measure measure, float size, bool atCenter = false,
+    internal static Transform Wrap(string path, string name, Measure measure, float size, bool atCenter = false,
                           System.Func<GameObject, Quaternion> orient = null) =>
         Wrap(new[] { path }, name, measure, size, atCenter, orient);
 
     // Puts prefabs (sharing one origin) inside an empty pivot, scales them together so the measured size
     // equals `size`, and offsets them so the pivot sits at the base centre (or the centre).
     // Pivot starts at the world origin.
-    static Transform Wrap(string[] paths, string name, Measure measure, float size, bool atCenter = false,
+    internal static Transform Wrap(string[] paths, string name, Measure measure, float size, bool atCenter = false,
                           System.Func<GameObject, Quaternion> orient = null)
     {
         var pivot = new GameObject(name).transform;
@@ -1590,7 +1590,7 @@ public static class ChristmasCardBuilder
         return (GameObject)PrefabUtility.InstantiatePrefab(prefab);
     }
 
-    static Bounds WorldBounds(GameObject go)
+    internal static Bounds WorldBounds(GameObject go)
     {
         var rs = go.GetComponentsInChildren<Renderer>().Where(r => !(r is ParticleSystemRenderer)).ToArray();
         var b = rs[0].bounds;
@@ -1631,7 +1631,7 @@ public static class ChristmasCardBuilder
     static GameObject FindInactiveRoot(string name) =>
         EditorSceneManager.GetActiveScene().GetRootGameObjects().FirstOrDefault(g => g.name == name);
 
-    static Transform NewChild(string name, Transform parent)
+    internal static Transform NewChild(string name, Transform parent)
     {
         var t = new GameObject(name).transform;
         t.SetParent(parent, false);
@@ -1640,7 +1640,7 @@ public static class ChristmasCardBuilder
 
     // ---------------------------------------------------------------- particle helpers
 
-    static ParticleSystem NewPS(string name, Transform parent, Material mat, bool local)
+    internal static ParticleSystem NewPS(string name, Transform parent, Material mat, bool local)
     {
         var go = new GameObject(name);
         go.transform.SetParent(parent, false);
@@ -1660,10 +1660,10 @@ public static class ChristmasCardBuilder
         return ps;
     }
 
-    static ParticleSystem.MinMaxCurve Range(float a, float b) => new ParticleSystem.MinMaxCurve(a, b);
+    internal static ParticleSystem.MinMaxCurve Range(float a, float b) => new ParticleSystem.MinMaxCurve(a, b);
 
     // Each particle picks one of these colours.
-    static ParticleSystem.MinMaxGradient Colors(params Color[] colours)
+    internal static ParticleSystem.MinMaxGradient Colors(params Color[] colours)
     {
         var g = new Gradient { mode = GradientMode.Fixed };
         g.SetKeys(colours.Select((c, i) => new GradientColorKey(c, (i + 1f) / colours.Length)).ToArray(),
@@ -1671,7 +1671,7 @@ public static class ChristmasCardBuilder
         return new ParticleSystem.MinMaxGradient(g) { mode = ParticleSystemGradientMode.RandomColor };
     }
 
-    static void Fade(ParticleSystem ps, float inUntil, float holdUntil)
+    internal static void Fade(ParticleSystem ps, float inUntil, float holdUntil)
     {
         var col = ps.colorOverLifetime;
         col.enabled = true;
@@ -1682,7 +1682,7 @@ public static class ChristmasCardBuilder
     }
 
     // pairs of (time, size) over the particle's life
-    static void SizeCurve(ParticleSystem ps, params float[] timeSize)
+    internal static void SizeCurve(ParticleSystem ps, params float[] timeSize)
     {
         var s = ps.sizeOverLifetime;
         s.enabled = true;
@@ -1693,7 +1693,7 @@ public static class ChristmasCardBuilder
 
     // ---------------------------------------------------------------- misc
 
-    static AudioSource NewAudio(GameObject go, AudioClip clip, bool loop)
+    internal static AudioSource NewAudio(GameObject go, AudioClip clip, bool loop)
     {
         var a = go.AddComponent<AudioSource>();
         a.clip = clip;
@@ -1703,7 +1703,7 @@ public static class ChristmasCardBuilder
     }
 
     // First clip in Assets/Audio whose file name contains any of the keywords.
-    static AudioClip FindClip(params string[] keywords)
+    internal static AudioClip FindClip(params string[] keywords)
     {
         if (!AssetDatabase.IsValidFolder("Assets/Audio")) return null;
         return AssetDatabase.FindAssets("t:AudioClip", new[] { "Assets/Audio" })
@@ -1713,7 +1713,7 @@ public static class ChristmasCardBuilder
             .FirstOrDefault();
     }
 
-    static T Load<T>(string path, bool required = true) where T : Object
+    internal static T Load<T>(string path, bool required = true) where T : Object
     {
         var asset = AssetDatabase.LoadAssetAtPath<T>(path);
         if (!asset && required) throw new System.Exception("Missing asset: " + path);
@@ -1726,7 +1726,7 @@ public static class ChristmasCardBuilder
             UnityEventTools.RemovePersistentListener(e, i);
     }
 
-    static Color Hex(string hex)
+    internal static Color Hex(string hex)
     {
         ColorUtility.TryParseHtmlString("#" + hex, out var c);
         return c;

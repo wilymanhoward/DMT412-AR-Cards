@@ -1,0 +1,410 @@
+using System.Collections;
+using System.Linq;
+using UnityEngine;
+
+// "Howard's Node Network": the network printed on the business card comes alive in 3D.
+//   Idle → Intro → Hub ⇄ Panel (a 3D scene above the node)
+// Intro: the HW block lifts off the card, the network draws itself out to four glowing nodes, and a mini-me
+// arrives and says hello. Hub: tap a node (About, Skills, Portfolio, Contact) and a pulse of light runs along the
+// line to it while its 3D scene grows above it; tap the logo to spin it, or the mini-me to make him wave.
+// The words come from Assets/Resources/business_card.json (BusinessCardContent); the UI is built in code
+// (BusinessCardController.UI.cs); the 3D scene is built by Tools > Business Card > Build Business Card.
+// CardHub decides when the card is found or lost; losing it pauses everything and progress is kept.
+public partial class BusinessCardController : MonoBehaviour, ICardExperience
+{
+    public enum State { Idle, Intro, Hub, Panel }
+
+    [System.Serializable]
+    public class Hub
+    {
+        public string title;
+        public Transform node;       // a glowing diamond above the printed one; pivot at its centre
+        public LineRenderer spoke;   // logo → node
+        public LineRenderer stem;    // node → the printed diamond on the card
+        [HideInInspector] public Vector3 rest, baseScale;
+        [HideInInspector] public float grow, pop, focus = 1f; // network drawn 0..1, pop-in 0..1 (overshoots), tap focus
+    }
+
+    [Header("Scene")]
+    public Camera arCamera;
+    public Transform content;        // under the Business Target; the card is 1 wide and 0.6 deep
+    public Transform logo;           // the 3D HW block, pivot at its centre
+    public Hub[] hubs;               // About, Skills, Portfolio, Contact
+    public LineRenderer[] ring;      // hub-to-hub lines: About-Skills, Skills-Portfolio, Portfolio-Contact
+    public Transform pulse;          // the light that runs along the lines
+    public Transform avatar, avatarHead;
+    public ParticleSystem burst, motes, swirl;
+
+    [Header("Audio")]
+    public AudioSource music, sfx;
+    public AudioClip tickClip, openClip, pulseClip, powerupClip, sparkleClip, popClip;
+    [Range(0, 1)] public float musicVolume = 0.35f;
+
+    [Header("Art")]
+    public Font font;
+    public Sprite panelSprite;       // rounded, 9-sliced
+    public Sprite iconMail, iconPhone, iconGlobe, iconClose, iconAbout, iconSkills, iconPortfolio, iconPrev, iconNext, iconMusic, iconMuted;
+
+    public State Current { get; private set; } = State.Idle;
+
+    // ICardExperience
+    public Transform Content => content;
+    public GameObject UiRoot => ui.root;
+
+    BusinessCardContent data;
+    Animator avatarAnim;
+    Vector3 logoRest, logoScale, avatarScale;
+    float ringGrow, logoSpin;
+    int selected = -1;
+    bool pulsing, muted;
+
+    string FirstName => data.name.Split(' ')[0];
+
+    void Awake()
+    {
+        data = BusinessCardContent.Load();
+        logoRest = logo.localPosition;
+        logoScale = logo.localScale;
+        avatarScale = avatar.localScale;
+        avatarAnim = avatar.GetComponentInChildren<Animator>();
+        foreach (var h in hubs) { h.rest = h.node.localPosition; h.baseScale = h.node.localScale; }
+        BuildUI();
+        BuildStages();
+        ResetScene();
+    }
+
+    // ---------- Called by CardHub ----------
+
+    // Shows or hides this card's UI and its 3D content (hidden while the home screen is up).
+    public void SetShown(bool shown)
+    {
+        ui.root.SetActive(shown);
+        foreach (var r in content.GetComponentsInChildren<Renderer>(true)) r.enabled = shown;
+    }
+
+    public void OnCardFound()
+    {
+        Time.timeScale = 1;
+        AudioListener.pause = false;
+        ui.lost.SetActive(false);
+        if (Current == State.Idle) StartCoroutine(Intro());
+    }
+
+    public void OnCardLost()
+    {
+        if (Current == State.Idle) return;
+        Time.timeScale = 0;          // freezes every tween, particle and animator
+        AudioListener.pause = true;
+        ui.lost.SetActive(true);
+    }
+
+    // Another card took over: start from the beginning next time this one is shown.
+    public void ResetToStart()
+    {
+        StopAllCoroutines();
+        ResetScene();
+    }
+
+    void ResetScene()
+    {
+        Current = State.Idle;
+        selected = -1;
+        pulsing = false;
+        ringGrow = logoSpin = 0;
+        logo.gameObject.SetActive(false);
+        foreach (var h in hubs)
+        {
+            h.grow = h.pop = 0;
+            h.focus = 1f;
+            h.node.gameObject.SetActive(false);
+            h.spoke.enabled = h.stem.enabled = false;
+        }
+        foreach (var line in ring) line.enabled = false;
+        pulse.gameObject.SetActive(false);
+        avatar.gameObject.SetActive(false);
+        burst.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        motes.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        swirl.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        music.Stop();
+        project = 0;
+        ResetGallery();
+        ResetUi();
+    }
+
+    // ---------- The intro ----------
+
+    IEnumerator Intro()
+    {
+        Current = State.Intro;
+        PlaySfx(powerupClip);
+        motes.Play();
+        StartCoroutine(FadeMusic(musicVolume, 3f));
+        yield return new WaitForSeconds(0.3f);
+
+        // 1. the HW block lifts off the card with a spin
+        logo.gameObject.SetActive(true);
+        Vector3 floor = new Vector3(logoRest.x, 0.01f, logoRest.z);
+        Burst(content.TransformPoint(floor), 30);
+        Haptics.Buzz(40, Haptics.Medium);
+        yield return Ease.Run(1.1f, t =>
+        {
+            logo.localPosition = Vector3.Lerp(floor, logoRest, Ease.OutCubic(t));
+            logo.localScale = logoScale * Mathf.Max(0.01f, Ease.OutBack(t, 1.3f));
+            logo.localRotation = Quaternion.Euler(0, 360f * (1 - Ease.OutCubic(t)), 0);
+        });
+        logo.localScale = logoScale;
+
+        // 2. the network draws itself out to the nodes, one after another
+        for (int i = 0; i < hubs.Length; i++)
+        {
+            StartCoroutine(DrawHub(i));
+            yield return new WaitForSeconds(0.5f);
+        }
+        yield return new WaitForSeconds(0.6f);
+        yield return Ease.Run(0.6f, t => ringGrow = t);
+        ringGrow = 1;
+
+        // 3. a mini-me arrives and says hello
+        yield return AvatarAppear();
+        ShowBubble("Hi, I'm " + FirstName + "!");
+        avatarAnim.CrossFade("Wave", 0.1f);
+        yield return new WaitForSeconds(2.4f);
+        avatarAnim.CrossFade("Look", 0.3f);
+        ShowBubble("Tap a node to explore", 3f);
+        ShowBanner(true);
+
+        Current = State.Hub;
+        StartCoroutine(IdlePulses());
+    }
+
+    // The line grows out to the node, then the node pops in with a spark and its label.
+    IEnumerator DrawHub(int i)
+    {
+        var h = hubs[i];
+        h.node.gameObject.SetActive(true);
+        h.node.localPosition = h.rest;
+        PlaySfx(pulseClip, 0.5f);
+        yield return Ease.Run(0.5f, t => h.grow = Ease.InOutSine(t));
+        h.grow = 1;
+        Burst(h.node.position, 24);
+        PlaySfx(tickClip);
+        Haptics.Buzz(20, Haptics.Light);
+        ShowTag(i);
+        yield return Ease.Run(0.45f, t => h.pop = Ease.OutBack(t, 2f));
+        h.pop = 1;
+    }
+
+    // He never just pops in: an orange spiral gathers, a flash, then he grows in with a full spin and a wave.
+    IEnumerator AvatarAppear()
+    {
+        Vector3 spot = avatar.localPosition;
+        float yaw = avatar.localEulerAngles.y;
+        avatar.gameObject.SetActive(true);
+        avatar.localScale = Vector3.zero;
+        swirl.transform.localPosition = spot;
+        swirl.Play();
+        PlaySfx(sparkleClip);
+        yield return new WaitForSeconds(0.6f);
+
+        Burst(content.TransformPoint(spot + Vector3.up * 0.1f), 40);
+        Haptics.Buzz(60, Haptics.Medium);
+        avatarAnim.CrossFade("Wave", 0.05f);
+        yield return Ease.Run(0.7f, t =>
+        {
+            avatar.localScale = avatarScale * Ease.OutBack(t, 1.4f);
+            avatar.localRotation = Quaternion.Euler(0, yaw - 360f * (1 - Ease.OutCubic(t)), 0);
+        });
+        swirl.Stop();
+        avatar.localScale = avatarScale;
+    }
+
+    // ---------- Every frame ----------
+
+    void Update()
+    {
+        if (Time.timeScale == 0 || Current == State.Idle) return;
+        float t = Time.time, dt = Time.deltaTime;
+        if (gallery) { UpdateGallery(dt); return; }
+        if (Current >= State.Hub) Float(t, dt);
+
+        for (int i = 0; i < hubs.Length; i++)
+        {
+            var h = hubs[i];
+            float target = selected < 0 ? 1f : (i == selected ? 1.3f : 0.8f); // the chosen node swells, the others step back
+            h.focus = Mathf.Lerp(h.focus, target, 1 - Mathf.Exp(-8f * dt));
+            h.node.localScale = h.baseScale * (h.pop * h.focus);
+        }
+
+        UpdateStages(t, dt);
+        if (Current >= State.Hub && !busy && TapInput.Started(out Vector2 screen)) HandleTap(screen);
+    }
+
+    // The idle motion that keeps it alive: everything bobs a little, the diamonds turn, the logo sways.
+    void Float(float t, float dt)
+    {
+        logo.localPosition = logoRest + Vector3.up * (0.008f * Mathf.Sin(t * 1.6f));
+        logo.localRotation = Quaternion.Euler(0, 10f * Mathf.Sin(t * 0.7f) + logoSpin, 0);
+        for (int i = 0; i < hubs.Length; i++)
+        {
+            hubs[i].node.localPosition = hubs[i].rest + Vector3.up * (0.007f * Mathf.Sin(t * 2f + i * 1.7f));
+            hubs[i].node.Rotate(0, 40f * dt, 0, Space.Self);
+        }
+    }
+
+    // The lines follow the bobbing nodes, so they are redrawn after everything has moved.
+    void LateUpdate()
+    {
+        if (Current == State.Idle || gallery) return;
+        Vector3 from = logo.localPosition;
+        for (int i = 0; i < hubs.Length; i++)
+        {
+            var h = hubs[i];
+            Vector3 to = h.node.localPosition;
+            SetLine(h.spoke, from, Vector3.Lerp(from, to, h.grow), h.grow > 0.001f);
+            SetLine(h.stem, to, Vector3.Lerp(to, new Vector3(h.rest.x, 0.002f, h.rest.z), h.grow), h.grow > 0.001f && h.pop > 0.001f);
+        }
+        for (int i = 0; i < ring.Length; i++)
+        {
+            float g = Mathf.Min(hubs[i].pop, hubs[i + 1].pop) * ringGrow;
+            ring[i].widthMultiplier = g; // fades in as it thickens
+            SetLine(ring[i], hubs[i].node.localPosition, hubs[i + 1].node.localPosition, g > 0.01f);
+        }
+    }
+
+    static void SetLine(LineRenderer line, Vector3 a, Vector3 b, bool on)
+    {
+        line.enabled = on;
+        if (!on) return;
+        line.SetPosition(0, a);
+        line.SetPosition(1, b);
+    }
+
+    // ---------- Taps ----------
+
+    void HandleTap(Vector2 screen)
+    {
+        var hits = Physics.RaycastAll(arCamera.ScreenPointToRay(screen), 100f);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+        foreach (var hit in hits)
+        {
+            Transform t = hit.collider.transform;
+            var tap = hit.collider.GetComponentInParent<Tappable>();
+            if (tap) { tap.onTap(); return; }
+            for (int i = 0; i < hubs.Length; i++)
+                if (t.IsChildOf(hubs[i].node)) { OpenPanel(i); return; }
+            if (t.IsChildOf(logo)) { StartCoroutine(SpinLogo()); return; }
+            if (t.IsChildOf(avatar)) { StartCoroutine(AvatarWave()); return; }
+        }
+        if (Current == State.Panel) ClosePanel(); // a tap on nothing closes what is open
+    }
+
+    void OpenPanel(int i)
+    {
+        if (i == 2) { if (!busy) StartCoroutine(EnterGallery()); return; } // Portfolio takes over the whole card
+        if (selected == i) { ClosePanel(); return; }
+        selected = i;
+        Current = State.Panel;
+        StartCoroutine(PulseTo(i, 0.6f));
+        PlaySfx(openClip);
+        Haptics.Buzz(30, Haptics.Medium);
+        avatarAnim.CrossFade("Talk", 0.25f);
+        ShowPanel(i);
+    }
+
+    void ClosePanel()
+    {
+        if (selected < 0) return;
+        selected = -1;
+        Current = State.Hub;
+        avatarAnim.CrossFade("Look", 0.3f);
+        HidePanel();
+        ShowBanner(true);
+        PlaySfx(tickClip);
+    }
+
+    // A pulse of light runs from the logo along the line to a node and sparks when it arrives.
+    IEnumerator PulseTo(int i, float duration)
+    {
+        if (pulsing) yield break;
+        pulsing = true;
+        var h = hubs[i];
+        pulse.gameObject.SetActive(true);
+        yield return Ease.Run(duration, t => pulse.localPosition = Vector3.Lerp(logo.localPosition, h.node.localPosition, Ease.InOutSine(t)));
+        pulse.gameObject.SetActive(false);
+        pulsing = false;
+        Burst(h.node.position, 24);
+    }
+
+    IEnumerator IdlePulses()
+    {
+        while (true)
+        {
+            yield return new WaitForSeconds(Random.Range(2.5f, 4.5f));
+            if (Current == State.Hub && !pulsing) yield return PulseTo(Random.Range(0, hubs.Length), 0.9f);
+        }
+    }
+
+    // Tap the logo: it spins twice with a little stretch.
+    IEnumerator SpinLogo()
+    {
+        PlaySfx(popClip);
+        Haptics.Buzz(30, Haptics.Medium);
+        Burst(logo.position, 30);
+        yield return Ease.Run(1.1f, t =>
+        {
+            logoSpin = 720f * Ease.OutCubic(t);
+            logo.localScale = logoScale * (1 + 0.15f * Mathf.Sin(Mathf.PI * t));
+        });
+        logoSpin = 0;
+        logo.localScale = logoScale;
+    }
+
+    // Tap the mini-me: he waves.
+    IEnumerator AvatarWave()
+    {
+        PlaySfx(popClip, 0.7f);
+        Haptics.Buzz(25, Haptics.Light);
+        avatarAnim.CrossFade("Wave", 0.15f);
+        ShowBubble("Hello again!", 2.2f);
+        yield return new WaitForSeconds(2.8f);
+        avatarAnim.CrossFade(Current == State.Panel ? "Talk" : "Look", 0.3f);
+    }
+
+    // ---------- Contact links ----------
+
+    void OpenLink(string url)
+    {
+        Haptics.Buzz(25, Haptics.Light);
+        PlaySfx(tickClip);
+        Application.OpenURL(url);
+    }
+
+    string MailLink => "mailto:" + data.email;
+    string PhoneLink => "tel:" + new string(data.phone.Where(c => char.IsDigit(c) || c == '+').ToArray());
+    static string WebLink(string address) => address.StartsWith("http") ? address : "https://" + address;
+
+    // ---------- Helpers ----------
+
+    void Burst(Vector3 world, int count) =>
+        burst.Emit(new ParticleSystem.EmitParams { position = world, applyShapeToPosition = true }, count);
+
+    void PlaySfx(AudioClip clip, float volume = 1f)
+    {
+        if (clip) sfx.PlayOneShot(clip, volume);
+    }
+
+    IEnumerator FadeMusic(float to, float seconds)
+    {
+        if (!music.isPlaying) { music.volume = 0; music.Play(); }
+        float from = music.volume;
+        yield return Ease.Run(seconds, t => music.volume = Mathf.Lerp(from, to, Ease.InOutSine(t)));
+    }
+
+    void ToggleSound()
+    {
+        muted = !muted;
+        AudioListener.volume = muted ? 0 : 1;
+        ui.soundIcon.sprite = muted ? iconMuted : iconMusic;
+        Haptics.Buzz(15, Haptics.Light);
+    }
+}

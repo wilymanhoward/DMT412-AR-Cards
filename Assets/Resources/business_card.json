@@ -1,0 +1,29 @@
+{
+  "name": "Howard Wilyman",
+  "tagline": "Student and AR experience builder",
+  "about": "Hi! I'm Howard, a student at Xiamen University Malaysia. I like turning ideas into interactive experiences, like this AR card. Tap the other nodes to see what I do and how to reach me.",
+  "interests": ["Augmented reality", "Game design", "Web apps"],
+  "skills": ["Unity", "Vuforia AR", "C#", "3D animation", "UI design", "Web development"],
+  "portfolio": [
+    {
+      "title": "AR Christmas Card",
+      "caption": "A snowy house that opens like a dollhouse, with Santa, kids and gifts to open. Built with Unity and Vuforia.",
+      "image": "Portfolio/placeholder_1"
+    },
+    {
+      "title": "Your next project",
+      "caption": "Replace this with a screenshot of your work: put the picture in Assets/Resources/Portfolio and change the image name here.",
+      "image": "Portfolio/placeholder_2"
+    },
+    {
+      "title": "Another project",
+      "caption": "Add as many projects as you like. Swipe left and right to move between them.",
+      "image": "Portfolio/placeholder_3"
+    }
+  ],
+  "email": "wilymanhoward@gmail.com",
+  "phone": "014-238 6192",
+  "website": "howardw.web.app",
+  "linkedin": "",
+  "github": ""
+}
