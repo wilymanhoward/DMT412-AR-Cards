@@ -13,7 +13,7 @@ using UnityEngine.UI;
 // CardHub decides when the card is found or lost and shows/hides this experience.
 // Losing the card pauses everything (Time.timeScale = 0) and shows "Find the card again"; progress is kept.
 // All references are filled in by Tools > Christmas Card > 2. Build Greeting Card.
-public class GreetingCardController : MonoBehaviour
+public class GreetingCardController : MonoBehaviour, ICardExperience
 {
     public enum State { Idle, Scanned, HouseUp, SantaArriving, Reveal, GiftsReady, Opening, BellReady, SantaVisit, GoldenGift, Finished }
 
@@ -150,10 +150,10 @@ public class GreetingCardController : MonoBehaviour
 
     public void OnCardFound()
     {
-        if (Current == State.Idle) { SetState(State.Scanned); return; }
-        Time.timeScale = 1;
+        Time.timeScale = 1; // also after another card was paused when this one took over
         AudioListener.pause = false;
         lostScreen.SetActive(false);
+        if (Current == State.Idle) SetState(State.Scanned);
     }
 
     public void OnCardLost()
@@ -163,6 +163,17 @@ public class GreetingCardController : MonoBehaviour
         AudioListener.pause = true;
         lostScreen.SetActive(true);
     }
+
+    // Another card took over: start from the beginning next time this one is shown.
+    public void ResetToStart()
+    {
+        StopAllCoroutines();
+        ResetScene();
+        SetState(State.Idle);
+    }
+
+    Transform ICardExperience.Content => content;
+    GameObject ICardExperience.UiRoot => uiRoot;
 
     // ---------- Buttons ----------
 

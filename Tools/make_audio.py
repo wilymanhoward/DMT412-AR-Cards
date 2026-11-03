@@ -321,6 +321,64 @@ def fire_crackle():
     return out
 
 
+# ------------------------------------------------------------------ business card
+
+def soft_pad(midis, dur, amp=0.05):
+    """A pad whose whole length is one smooth swell, so neighbouring chords melt into each other."""
+    n = int(dur * SR)
+    out = [0.0] * n
+    for m in midis:
+        w = 2 * math.pi * hz(m) / SR
+        for i in range(n):
+            env = math.sin(math.pi * i / n) ** 2
+            out[i] += amp * env * (math.sin(w * i) + 0.2 * math.sin(2 * w * i))
+    return out
+
+
+def biz_ambient():
+    """Calm and a little techy: slow chords, a soft low note on each, sparse high plucks. 12 s, loops seamlessly."""
+    dur = 12.0
+    out = silence(dur)
+    chords = [[57, 64, 67, 71], [53, 60, 64, 69], [48, 55, 59, 64], [55, 62, 67, 71]]
+    for k, chord in enumerate(chords):
+        mix(out, soft_pad(chord, 4.5), k * 3.0 - 0.75, wrap=True)
+        mix(out, bass(chord[0] - 12, 2.8, 0.16), k * 3.0, wrap=True)
+    t = 1.0
+    while t < dur:
+        mix(out, bell(random.choice([81, 84, 88, 76, 79]), 1.8, 0.07), t, wrap=True)
+        t += random.uniform(1.2, 2.6)
+    return out
+
+
+def biz_tick():
+    out = bell(98, 0.3, 0.45)
+    mix(out, noise(0.012, 0.25, 0), 0)
+    return out
+
+
+def biz_open():
+    out = silence(0.9)
+    for k, m in enumerate((79, 86, 91)):
+        mix(out, bell(m, 0.8, 0.3 - 0.04 * k), k * 0.07)
+    mix(out, noise(0.5, 0.08, 6, smooth=0.9), 0)
+    return out
+
+
+def biz_pulse():
+    out = silence(1.0)
+    mix(out, sweep(500, 2400, 0.5, 0.35, decay=4.0, curve=1.6), 0)
+    mix(out, bell(98, 0.6, 0.25), 0.42)
+    return out
+
+
+def biz_powerup():
+    out = silence(1.9)
+    mix(out, sweep(180, 1600, 1.0, 0.3, decay=1.0, curve=2.0), 0)
+    for m in (72, 76, 79, 84):
+        mix(out, bell(m, 1.4, 0.22), 0.95)
+    return out
+
+
 if __name__ == "__main__":
     folder = sys.argv[1]
     os.makedirs(folder, exist_ok=True)
@@ -337,3 +395,8 @@ if __name__ == "__main__":
     write(folder, "tree_jingle.wav", tree_tap())
     write(folder, "hand_bell_ring.wav", hand_bell())
     write(folder, "fire_crackle_loop.wav", fire_crackle(), peak=0.8, fade=False)
+    write(folder, "biz_ambient_loop.wav", biz_ambient(), peak=0.7, fade=False)
+    write(folder, "biz_tick.wav", biz_tick(), peak=0.7)
+    write(folder, "biz_open.wav", biz_open(), peak=0.7)
+    write(folder, "biz_pulse.wav", biz_pulse(), peak=0.7)
+    write(folder, "biz_powerup.wav", biz_powerup(), peak=0.75)

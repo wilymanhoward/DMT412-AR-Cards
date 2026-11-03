@@ -1,72 +1,132 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using Vuforia;
 
-// App shell: a neutral home screen until a card is seen, then that card's own experience
-// (theme, UI, music) takes over. Only a camera-confirmed TRACKED counts as found; EXTENDED_TRACKED is
-// what Vuforia reports when the card leaves the view, so after lostGrace seconds of it the card is lost
-// ("Find the card again"), and after homeDelay more seconds the app returns home. Progress is kept.
-// Switching screens cross-fades; the Christmas UI plays its own entrance (RevealBurst, UISlideIn).
-// shortcut: handles one card (the greeting card); when the business card gets its own experience,
-// turn `greeting` into a list and give each card its own pause instead of Time.timeScale.
+// App shell: a neutral home screen until a card is seen, then that card's own experience (theme, UI, music)
+// takes over. Works for any number of cards (the greeting card and the business card).
+//  - Only a camera-confirmed TRACKED counts as found. EXTENDED_TRACKED is what Vuforia reports when a card
+//    leaves the view, so after lostGrace seconds of it the card is lost ("Find the card again"), and after
+//    homeDelay more seconds the app returns home. Progress is kept if the same card comes back.
+//  - While one card is in view, the others are ignored. If a different card takes over, the old one starts over.
+//  - Screens cross-fade; each experience plays its own entrance.
 public class CardHub : MonoBehaviour
 {
     public GameObject homeScreen;
     public GreetingCardController greeting;
-    public float lostGrace = 0.5f; // ignores brief TRACKED ↔ EXTENDED_TRACKED flickers
+    public BusinessCardController business; // set by Tools > Business Card > Build Business Card
+    public float lostGrace = 0.5f;          // ignores brief TRACKED ↔ EXTENDED_TRACKED flickers
     public float homeDelay = 3f;
 
-    bool found;
-    float notTrackedSince = -1, lostSince = -1;
-    CanvasGroup homeGroup, cardGroup;
+    class Slot
+    {
+        public ICardExperience experience;
+        public CanvasGroup group;
+        public bool tracked;
+        public float notTrackedSince = -1;
+    }
+
+    readonly List<Slot> slots = new List<Slot>();
+    Slot shown;            // the card on screen (in view, or lost and waiting to go home); null at the home screen
+    Slot last;             // the card whose experience is in progress, even while hidden at home
+    float lostSince = -1;
+    CanvasGroup homeGroup;
 
     void Start()
     {
         homeGroup = Group(homeScreen);
-        cardGroup = Group(greeting.uiRoot);
-        greeting.content.GetComponentInParent<ObserverBehaviour>().OnTargetStatusChanged += OnStatus;
-        greeting.SetShown(false);
+        Add(greeting);
+        Add(business);
         homeScreen.SetActive(true);
     }
 
-    void OnStatus(ObserverBehaviour _, TargetStatus status)
+    void Add(MonoBehaviour behaviour)
+    {
+        if (!behaviour) return; // that card isn't in the scene
+        var experience = (ICardExperience)behaviour;
+        var slot = new Slot { experience = experience, group = Group(experience.UiRoot) };
+        experience.Content.GetComponentInParent<ObserverBehaviour>().OnTargetStatusChanged += (_, status) => OnStatus(slot, status);
+        experience.SetShown(false);
+        slots.Add(slot);
+    }
+
+    void OnStatus(Slot slot, TargetStatus status)
     {
         if (status.Status == Status.TRACKED)
         {
-            notTrackedSince = lostSince = -1;
-            if (found) return;
-            found = true;
-            StopAllCoroutines();
-            cardGroup.alpha = 1;
-            greeting.SetShown(true);   // its entrance animations start as it becomes active
-            greeting.OnCardFound();
-            StartCoroutine(Fade(homeGroup, homeGroup.alpha, 0, 0.35f, () => homeScreen.SetActive(false)));
+            slot.notTrackedSince = -1;
+            if (slot.tracked) return;
+            slot.tracked = true;
+            if (shown != null && shown != slot && shown.tracked) return; // another card is in view: stay with it
+            Show(slot);
         }
-        else if (found && notTrackedSince < 0)
-            notTrackedSince = Time.unscaledTime;
+        else if (slot.tracked && slot.notTrackedSince < 0)
+            slot.notTrackedSince = Time.unscaledTime;
+    }
+
+    void Show(Slot slot)
+    {
+        StopAllCoroutines();
+        lostSince = -1;
+        if (last != null && last != slot) last.experience.ResetToStart(); // a different card: the old one starts over
+        if (shown != null && shown != slot)
+        {
+            shown.experience.SetShown(false);
+            shown.group.alpha = 1;
+        }
+        shown = last = slot;
+        slot.group.alpha = 1;
+        slot.experience.SetShown(true);  // its entrance animations start as it becomes active
+        slot.experience.OnCardFound();
+        StartCoroutine(Fade(homeGroup, homeGroup.alpha, 0, 0.35f, () => homeScreen.SetActive(false)));
     }
 
     void Update()
     {
         float now = Time.unscaledTime; // keeps counting while the card's experience is paused
-        if (notTrackedSince >= 0 && now - notTrackedSince > lostGrace)
+        foreach (var slot in slots)
         {
-            notTrackedSince = -1;
+            if (slot.notTrackedSince < 0 || now - slot.notTrackedSince <= lostGrace) continue;
+            slot.notTrackedSince = -1;
+            slot.tracked = false;
+            if (slot != shown) continue;
+            var other = slots.Find(o => o != slot && o.tracked);
+            if (other != null) { Show(other); break; } // the other card was already in view
             lostSince = now;
-            found = false;
-            greeting.OnCardLost();
+            slot.experience.OnCardLost();
         }
-        if (lostSince >= 0 && now - lostSince > homeDelay)
+        if (lostSince >= 0 && shown != null && now - lostSince > homeDelay)
         {
             lostSince = -1;
             StartCoroutine(GoHome());
         }
     }
 
+    // The card's back button: leave it for the home screen. The card stays in view but is ignored until it has
+    // been lost and found again, and then it starts from the beginning.
+    public void ReturnHome()
+    {
+        if (shown == null) return;
+        StopAllCoroutines();
+        lostSince = -1;
+        Time.timeScale = 1;
+        AudioListener.pause = false;
+        StartCoroutine(ReturnHomeRoutine(shown));
+    }
+
+    IEnumerator ReturnHomeRoutine(Slot slot)
+    {
+        yield return GoHome();
+        slot.experience.ResetToStart();
+        if (last == slot) last = null;
+    }
+
     IEnumerator GoHome()
     {
-        yield return Fade(cardGroup, 1, 0, 0.3f, () => greeting.SetShown(false));
-        cardGroup.alpha = 1;
+        var slot = shown;
+        yield return Fade(slot.group, 1, 0, 0.3f, () => slot.experience.SetShown(false));
+        slot.group.alpha = 1;
+        shown = null;
         homeScreen.SetActive(true);
         yield return Fade(homeGroup, 0, 1, 0.4f, null);
     }
