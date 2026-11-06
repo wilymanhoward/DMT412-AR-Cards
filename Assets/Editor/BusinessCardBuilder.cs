@@ -30,8 +30,9 @@ public static class BusinessCardBuilder
     {
         ("About", 503, 191), ("Skills", 801, 142), ("Portfolio", 758, 486), ("Contact", 455, 560),
     };
+    const float DeskSize = 1.45f; // the mini-me and his desk, as a multiple of the size they are built at
     const float DeskYaw = 55; // which way he faces: 0 = up the card, 90 = to the right
-    const float LogoPx = 125, LogoPy = 125, AvatarPx = 610, AvatarPy = 415;
+    const float LogoPx = 125, LogoPy = 125, AvatarPx = 190, AvatarPy = 405;
 
     static readonly Color Navy = Hex("14213D"), Orange = Hex("F26A1B"), Cream = Hex("F7F5F0"), Slate = Hex("5C6B8F");
     static Material navyMat, orangeMat, creamMat, lineMat, sparkMat, glowMat;
@@ -433,6 +434,7 @@ public static class BusinessCardBuilder
         var avatar = Wrap(Boy, "Mini Me", Measure.Height, AvatarHeight);
         avatar.SetParent(content, false);
         avatar.localPosition = OnCard(AvatarPx, AvatarPy, 0);
+        avatar.localScale = Vector3.one * DeskSize;
         avatar.localRotation = Quaternion.Euler(0, DeskYaw, 0); // he faces his monitor; we see him from the side and a little behind
 
         var animator = avatar.GetComponentInChildren<Animator>();
