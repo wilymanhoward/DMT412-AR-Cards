@@ -31,8 +31,8 @@ public static class BusinessCardBuilder
         ("About", 503, 191), ("Skills", 801, 142), ("Portfolio", 758, 486), ("Contact", 455, 560),
     };
     const float DeskSize = 1.45f; // the mini-me and his desk, as a multiple of the size they are built at
-    const float DeskYaw = 55; // which way he faces: 0 = up the card, 90 = to the right
-    const float LogoPx = 125, LogoPy = 125, AvatarPx = 190, AvatarPy = 405;
+    const float DeskYaw = 0; // which way he faces: 0 = up the card (his back to you, his screen toward you), 90 = to the right
+    const float LogoPx = 125, LogoPy = 125, AvatarPx = 80, AvatarPy = 590; // bottom-left corner: the only spot clear of every line and node
 
     static readonly Color Navy = Hex("14213D"), Orange = Hex("F26A1B"), Cream = Hex("F7F5F0"), Slate = Hex("5C6B8F");
     static Material navyMat, orangeMat, creamMat, lineMat, sparkMat, glowMat;
@@ -469,7 +469,6 @@ public static class BusinessCardBuilder
         const float seat = 0.04f, deskTop = 0.086f;
         animator.transform.localPosition += Vector3.down * 0.048f;
 
-        Primitive(PrimitiveType.Cylinder, "Rug", rig, new Vector3(0, 0.001f, 0.05f), new Vector3(0.3f, 0.001f, 0.3f), creamMat);
         Cube("Seat", rig, new Vector3(0, seat - 0.004f, -0.008f), new Vector3(0.056f, 0.008f, 0.056f), orangeMat);
         Cube("Chair Back", rig, new Vector3(0, seat + 0.036f, -0.038f), new Vector3(0.056f, 0.07f, 0.007f), orangeMat);
         Primitive(PrimitiveType.Cylinder, "Chair Post", rig, new Vector3(0, seat / 2 - 0.004f, -0.008f), new Vector3(0.008f, seat / 2 - 0.004f, 0.008f), navyMat);
