@@ -6,19 +6,24 @@
   "skills": ["Unity", "Vuforia AR", "C#", "3D animation", "UI design", "Web development"],
   "portfolio": [
     {
-      "title": "AR Christmas Card",
-      "caption": "A snowy house that opens like a dollhouse, with Santa, kids and gifts to open. Built with Unity and Vuforia.",
-      "image": "Portfolio/placeholder_1"
+      "title": "AquaStrike",
+      "caption": "A 1v1 online water-gun shooter in a giant inflatable water park, with water balloons and three squad fighters. Solo, Unity and C#, 2026.",
+      "image": "Portfolio/game_aquastrike"
     },
     {
-      "title": "Your next project",
-      "caption": "Replace this with a screenshot of your work: put the picture in Assets/Resources/Portfolio and change the image name here.",
-      "image": "Portfolio/placeholder_2"
+      "title": "We Were Mummies",
+      "caption": "A 2-player online co-op escape from an Egyptian tomb where each player is missing a sense. Named Best Game. Unity and Photon, 2026.",
+      "image": "Portfolio/game_we_were_mummies"
     },
     {
-      "title": "Another project",
-      "caption": "Add as many projects as you like. Swipe left and right to move between them.",
-      "image": "Portfolio/placeholder_3"
+      "title": "Sea Vagabond",
+      "caption": "A third-person action-adventure through jungles, storms and lava caves. I designed Level 1. Award winner at EGDAD-XMUM 2025, team of 6.",
+      "image": "Portfolio/game_sea_vagabond"
+    },
+    {
+      "title": "MR Detective",
+      "caption": "My final year project: two players solve one crime scene together in co-located mixed reality on Meta Quest 3. Unity, 2026.",
+      "image": "Portfolio/game_mr_detective"
     }
   ],
   "email": "wilymanhoward@gmail.com",

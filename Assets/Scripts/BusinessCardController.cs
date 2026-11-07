@@ -57,6 +57,10 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
     float ringGrow, logoSpin;
     int selected = -1;
     bool pulsing, muted;
+    float avatarYaw;                 // the way he faces as built; swiping turns him, a restart turns him back
+    bool turning, turned;            // a finger came down on him; it has moved far enough to be a swipe
+    Vector2 turnStart;
+    float turnFrom;
 
     string FirstName => data.name.Split(' ')[0];
 
@@ -66,6 +70,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         logoRest = logo.localPosition;
         logoScale = logo.localScale;
         avatarScale = avatar.localScale;
+        avatarYaw = avatar.localEulerAngles.y;
         avatarAnim = avatar.GetComponentInChildren<Animator>();
         foreach (var h in hubs) { h.rest = h.node.localPosition; h.baseScale = h.node.localScale; }
         BuildUI();
@@ -122,6 +127,8 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         foreach (var line in ring) line.enabled = false;
         pulse.gameObject.SetActive(false);
         avatar.gameObject.SetActive(false);
+        avatar.localRotation = Quaternion.Euler(0, avatarYaw, 0);
+        turning = false;
         burst.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         motes.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         swirl.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
@@ -236,7 +243,8 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         }
 
         UpdateStages(t, dt);
-        if (Current >= State.Hub && !busy && TapInput.Started(out Vector2 screen)) HandleTap(screen);
+        if (turning) TurnAvatar();
+        else if (Current >= State.Hub && !busy && TapInput.Started(out Vector2 screen)) HandleTap(screen);
     }
 
     // The idle motion that keeps it alive: everything bobs a little, the diamonds turn, the logo sways.
@@ -293,7 +301,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
             for (int i = 0; i < hubs.Length; i++)
                 if (t.IsChildOf(hubs[i].node)) { OpenPanel(i); return; }
             if (t.IsChildOf(logo)) { StartCoroutine(SpinLogo()); return; }
-            if (t.IsChildOf(avatar)) { StartCoroutine(AvatarWave()); return; }
+            if (t.IsChildOf(avatar)) { turning = true; turned = false; turnStart = screen; turnFrom = avatar.localEulerAngles.y; return; }
         }
         if (Current == State.Panel) ClosePanel(); // a tap on nothing closes what is open
     }
@@ -357,6 +365,27 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         });
         logoSpin = 0;
         logo.localScale = logoScale;
+    }
+
+    // A finger on the mini-me: a swipe turns him (and his desk) around, a tap makes him wave.
+    void TurnAvatar()
+    {
+        bool held;
+        Vector2 at;
+        if (Input.touchCount > 0)
+        {
+            var touch = Input.GetTouch(0);
+            at = touch.position;
+            held = touch.phase != TouchPhase.Ended && touch.phase != TouchPhase.Canceled;
+        }
+        else { at = Input.mousePosition; held = Input.GetMouseButton(0); }
+
+        float dx = at.x - turnStart.x;
+        if (!turned && Mathf.Abs(dx) > 20f) turned = true;
+        if (turned) avatar.localRotation = Quaternion.Euler(0, turnFrom - dx * 0.35f, 0); // he follows the finger
+        if (held) return;
+        turning = false;
+        if (!turned) StartCoroutine(AvatarWave());
     }
 
     // Tap the mini-me: he waves.
