@@ -58,6 +58,11 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
     int selected = -1;
     bool pulsing, muted;
     float avatarYaw;                 // the way he faces as built; swiping turns him, a restart turns him back
+    Vector3 avatarSpot;
+    // The middle of him, his chair and his desk, in his own frame (see BusinessCardBuilder.BuildDesk: chair back
+    // at z -0.04, desk back at z 0.165). Swipes turn everything around this point, not around his feet.
+    static readonly Vector3 DeskCentre = new Vector3(0, 0, 0.062f);
+    Vector3 turnPivot;
     bool turning, turned;            // a finger came down on him; it has moved far enough to be a swipe
     Vector2 turnStart;
     float turnFrom;
@@ -71,6 +76,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         logoScale = logo.localScale;
         avatarScale = avatar.localScale;
         avatarYaw = avatar.localEulerAngles.y;
+        avatarSpot = avatar.localPosition;
         avatarAnim = avatar.GetComponentInChildren<Animator>();
         foreach (var h in hubs) { h.rest = h.node.localPosition; h.baseScale = h.node.localScale; }
         BuildUI();
@@ -128,6 +134,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         pulse.gameObject.SetActive(false);
         avatar.gameObject.SetActive(false);
         avatar.localRotation = Quaternion.Euler(0, avatarYaw, 0);
+        avatar.localPosition = avatarSpot;
         turning = false;
         burst.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         motes.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
@@ -301,7 +308,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
             for (int i = 0; i < hubs.Length; i++)
                 if (t.IsChildOf(hubs[i].node)) { OpenPanel(i); return; }
             if (t.IsChildOf(logo)) { StartCoroutine(SpinLogo()); return; }
-            if (t.IsChildOf(avatar)) { turning = true; turned = false; turnStart = screen; turnFrom = avatar.localEulerAngles.y; return; }
+            if (t.IsChildOf(avatar)) { turning = true; turned = false; turnStart = screen; turnFrom = avatar.localEulerAngles.y; turnPivot = avatar.localPosition + CentreOffset(turnFrom); return; }
         }
         if (Current == State.Panel) ClosePanel(); // a tap on nothing closes what is open
     }
@@ -382,11 +389,19 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
 
         float dx = at.x - turnStart.x;
         if (!turned && Mathf.Abs(dx) > 20f) turned = true;
-        if (turned) avatar.localRotation = Quaternion.Euler(0, turnFrom - dx * 0.35f, 0); // he follows the finger
+        if (turned) // he and his desk follow the finger, turning around their shared middle
+        {
+            float yaw = turnFrom - dx * 0.35f;
+            avatar.localRotation = Quaternion.Euler(0, yaw, 0);
+            avatar.localPosition = turnPivot - CentreOffset(yaw);
+        }
         if (held) return;
         turning = false;
         if (!turned) StartCoroutine(AvatarWave());
     }
+
+    // From his feet (the pivot) to the middle of the desk set, in card space, when he faces `yaw`.
+    Vector3 CentreOffset(float yaw) => Quaternion.Euler(0, yaw, 0) * Vector3.Scale(avatar.localScale, DeskCentre);
 
     // Tap the mini-me: he waves.
     IEnumerator AvatarWave()
