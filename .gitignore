@@ -29,3 +29,13 @@ Thumbs.db
 # Vuforia licence keys: kept on this machine only, never committed
 /Assets/Resources/VuforiaConfiguration.asset
 /Assets/Resources/VuforiaConfiguration.asset.meta
+
+# Unity Asset Store packs: licensed to me, not for public redistribution (import them from the Asset Store)
+/Assets/polyperfect/
+/Assets/polyperfect.meta
+/Assets/ithappy/
+/Assets/ithappy.meta
+/Assets/Christmas Tree - POLYCRAFT Series/
+/Assets/Christmas Tree - POLYCRAFT Series.meta
+/Assets/PolyPeople_SantaClaus/
+/Assets/PolyPeople_SantaClaus.meta
