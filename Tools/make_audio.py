@@ -643,6 +643,38 @@ def biz_drum():
     return out
 
 
+# vowel formants (Hz) for a young male voice: a, e, i, o, u
+VOWELS = [(730, 1090, 2440), (530, 1840, 2480), (300, 2200, 2900), (570, 840, 2410), (330, 900, 2240)]
+
+
+def talk_syllable(k):
+    """The mini-me's mumble: one soft syllable, a buzzy voice pulse shaped by vowel formants (so it sounds like a
+    mouth, not a beep), with a gentle consonant at the front and a falling pitch."""
+    rng = random.Random(100 + k)
+    f1, f2, f3 = VOWELS[k % len(VOWELS)]
+    dur = 0.11 + 0.03 * rng.random()
+    n, f0 = int(dur * SR), 165 * rng.uniform(0.94, 1.08)
+    src, ph = [], 0.0
+    for i in range(n):
+        t = i / SR
+        ph += (f0 * (1 - 0.12 * t / dur) * (1 + 0.01 * rng.uniform(-1, 1))) / SR
+        if ph >= 1:
+            ph -= 1
+        src.append((1 - 2 * ph) + 0.15 * rng.uniform(-1, 1))  # sawtooth-ish glottal buzz plus breath
+    voice = [0.0] * n
+    for f, q, g in ((f1, 6, 1.0), (f2, 9, 0.5), (f3, 12, 0.18)):
+        for i, v in enumerate(bandpass(src, f, q)):
+            voice[i] += g * v
+    for i in range(n):  # soft attack, round release
+        t = i / n
+        voice[i] *= min(1, t / 0.12) * (1 - t) ** 1.5
+    out = [0.0] * (n + int(0.02 * SR))
+    if k % 3 != 2:  # most syllables start with a soft b/d/m-like consonant
+        mix(out, [0.25 * v for v in bandpass(burst(0.012, 350, rng), rng.choice([400, 1500, 2600]), 1.5)], 0)
+    mix(out, voice, 0.006)
+    return out
+
+
 if __name__ == "__main__":
     folder = sys.argv[1]
     os.makedirs(folder, exist_ok=True)
@@ -671,3 +703,5 @@ if __name__ == "__main__":
     write(res, "biz_rumble.wav", biz_rumble(), peak=0.7)
     write(res, "biz_bang.wav", biz_bang(), peak=0.8)
     write(res, "biz_drum.wav", biz_drum(), peak=0.85)
+    for k in range(8):
+        write(res, "biz_talk_%d.wav" % k, talk_syllable(k), peak=0.5)

@@ -100,8 +100,14 @@ public partial class BusinessCardController
     void ShowBanner(bool on) => ui.banner.SetActive(on);
     void ShowTag(int i) => ui.tags[i].SetActive(true);
 
+    AudioSource talkSource;
+    AudioClip[] talkClips;
+    Coroutine mumble;
+
     void ShowBubble(string text, float seconds = 0f)
     {
+        if (mumble != null) StopCoroutine(mumble);
+        mumble = StartCoroutine(Mumble(text));
         ui.bubbleText.text = text;
         if (ui.bubbleRoutine != null) StopCoroutine(ui.bubbleRoutine);
         ui.bubble.SetActive(false);
@@ -109,8 +115,34 @@ public partial class BusinessCardController
         if (seconds > 0) ui.bubbleRoutine = StartCoroutine(HideBubbleAfter(seconds));
     }
 
+    // He mumbles while he talks: a soft syllable for every word or so, each a little higher or lower, like a
+    // cartoon voice (the syllables are made by Tools/make_audio.py, Resources/Audio/biz_talk_*).
+    IEnumerator Mumble(string text)
+    {
+        if (talkClips == null)
+        {
+            talkClips = new AudioClip[8];
+            for (int i = 0; i < talkClips.Length; i++) talkClips[i] = Resources.Load<AudioClip>("Audio/biz_talk_" + i);
+            talkSource = gameObject.AddComponent<AudioSource>();
+            talkSource.playOnAwake = false;
+        }
+        int syllables = Mathf.Clamp(Mathf.RoundToInt(text.Split(' ').Length * 1.4f), 3, 12);
+        int last = -1;
+        for (int i = 0; i < syllables; i++)
+        {
+            int k = Random.Range(0, talkClips.Length);
+            if (k == last) k = (k + 1) % talkClips.Length; // never the same sound twice in a row
+            last = k;
+            talkSource.pitch = Random.Range(0.94f, 1.12f) * (i == syllables - 1 ? 0.92f : 1f); // it drops at the end of a sentence
+            if (talkClips[k]) talkSource.PlayOneShot(talkClips[k], 0.6f);
+            yield return new WaitForSeconds(Random.Range(0.085f, 0.125f));
+        }
+        mumble = null;
+    }
+
     void HideBubble()
     {
+        if (mumble != null) { StopCoroutine(mumble); mumble = null; }
         if (ui.bubbleRoutine != null) StopCoroutine(ui.bubbleRoutine);
         ui.bubbleRoutine = null;
         ui.bubble.SetActive(false);

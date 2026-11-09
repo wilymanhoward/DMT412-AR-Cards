@@ -63,6 +63,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
     // at z -0.04, desk back at z 0.165). Swipes turn everything around this point, not around his feet.
     static readonly Vector3 DeskCentre = new Vector3(0, 0, 0.062f);
     Vector3 turnPivot;
+    CapsuleCollider avatarCol;
     bool turning, turned;            // a finger came down on him; it has moved far enough to be a swipe
     Vector2 turnStart;
     float turnFrom;
@@ -86,6 +87,8 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         avatarYaw = avatar.localEulerAngles.y;
         avatarSpot = avatar.localPosition;
         avatarAnim = avatar.GetComponentInChildren<Animator>();
+        avatarCol = avatar.GetComponent<CapsuleCollider>();
+        if (avatarCol) avatarCol.radius = Mathf.Min(avatarCol.radius, 0.05f); // snug round him, so it doesn't cover the desk
         foreach (var h in hubs) { h.rest = h.node.localPosition; h.baseScale = h.node.localScale; }
         BuildUI();
         BuildStages();
@@ -319,9 +322,10 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
     {
         var hits = Physics.RaycastAll(arCamera.ScreenPointToRay(screen), 100f);
         System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-        // his monitor starts Bug Hunt even when he is in front of it (he sits between you and the screen)
         if (!System.Array.Exists(hits, h => h.collider.transform.IsChildOf(logo))) CancelCharge(); // tapped away from a charging logo
-        if (TappedMonitor(hits)) { StartCoroutine(BugHuntRoutine()); return; }
+        // his monitor starts Bug Hunt even through the desk, but a tap on him (nearer than the monitor) is for him
+        int me = System.Array.FindIndex(hits, h => h.collider == avatarCol), screen0 = System.Array.FindIndex(hits, h => h.collider == monitorCol);
+        if (TappedMonitor(hits) && (me < 0 || screen0 < me)) { StartCoroutine(BugHuntRoutine()); return; }
         foreach (var hit in hits)
         {
             Transform t = hit.collider.transform;
@@ -335,9 +339,11 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         if (Current == State.Panel) ClosePanel(); // a tap on nothing closes what is open
     }
 
+    static readonly string[] PanelLines = { "Here's a bit about me!", "These are the tools I use.", "Check out my games!", "Let's talk! Pick one." };
+
     void OpenPanel(int i)
     {
-        if (i == 2) { if (!busy) StartCoroutine(EnterGallery()); return; } // Portfolio takes over the whole card
+        if (i == 2) { if (!busy) { ShowBubble(PanelLines[2], 2.2f); StartCoroutine(EnterGallery()); } return; } // Portfolio takes over the whole card
         if (selected == i) { ClosePanel(); return; }
         selected = i;
         Current = State.Panel;
@@ -345,6 +351,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         PlaySfx(openClip);
         Haptics.Buzz(30, Haptics.Medium);
         avatarAnim.CrossFade("Talk", 0.25f);
+        ShowBubble(PanelLines[i], 2.4f);
         ShowPanel(i);
     }
 
@@ -425,13 +432,25 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
     // From his feet (the pivot) to the middle of the desk set, in card space, when he faces `yaw`.
     Vector3 CentreOffset(float yaw) => Quaternion.Euler(0, yaw, 0) * Vector3.Scale(avatar.localScale, DeskCentre);
 
-    // Tap the mini-me: he waves.
+    // Tap the mini-me: he waves and says the next of his lines (they also hint at the hidden things to try).
+    int lineNo;
+    string[] Lines() => new[]
+    {
+        "Hi, I'm " + FirstName + "! Tap a node to explore.",
+        "I make games and AR apps.",
+        "Psst... tap my monitor.",
+        "Swipe me to turn my desk around.",
+        "Try tapping my logo 5 times. Trust me.",
+        "Want to work together? Tap Contact!",
+    };
+
     IEnumerator AvatarWave()
     {
         PlaySfx(popClip, 0.7f);
         Haptics.Buzz(25, Haptics.Light);
-        avatarAnim.CrossFade("Wave", 0.15f);
-        ShowBubble("Hello again!", 2.2f);
+        avatarAnim.CrossFade(lineNo % 2 == 0 ? "Wave" : "Talk", 0.15f);
+        var lines = Lines();
+        ShowBubble(lines[lineNo++ % lines.Length], 2.6f);
         yield return new WaitForSeconds(2.8f);
         avatarAnim.CrossFade(Current == State.Panel ? "Talk" : "Look", 0.3f);
     }

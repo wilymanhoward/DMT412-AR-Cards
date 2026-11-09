@@ -163,6 +163,7 @@ public static class ChristmasCardBuilder
         hub.homeScreen = BuildHomeUI();
         hub.greeting = c;
         ui.root.SetActive(false);
+        ChristmasLayout.Restore(false); // put back the hand-tuned layout (Tools > Christmas Card > 3. Save House Layout)
 
         EditorSceneManager.MarkSceneDirty(target.scene);
         EditorSceneManager.SaveScene(target.scene);
