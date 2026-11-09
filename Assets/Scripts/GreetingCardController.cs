@@ -13,7 +13,7 @@ using UnityEngine.UI;
 // CardHub decides when the card is found or lost and shows/hides this experience.
 // Losing the card pauses everything (Time.timeScale = 0) and shows "Find the card again"; progress is kept.
 // All references are filled in by Tools > Christmas Card > 2. Build Greeting Card.
-public class GreetingCardController : MonoBehaviour, ICardExperience
+public partial class GreetingCardController : MonoBehaviour, ICardExperience
 {
     public enum State { Idle, Scanned, HouseUp, SantaArriving, Reveal, GiftsReady, Opening, BellReady, SantaVisit, GoldenGift, Finished }
 
@@ -132,7 +132,9 @@ public class GreetingCardController : MonoBehaviour, ICardExperience
         bellScale = bell.localScale;
         roofPos = roof.localPosition; roofRot = roof.localRotation; roofScale = roof.localScale;
         wallRot = frontWall.localRotation; wallScale = frontWall.localScale;
+        LoadRealSounds(); // GreetingCardController.Extras.cs
         mainMusic = music.clip;
+        BuildExtras();
         ResetScene();
         SetState(State.Idle);
     }
@@ -460,6 +462,8 @@ public class GreetingCardController : MonoBehaviour, ICardExperience
             foreach (var hit in hits)
                 if (hit.collider.transform.IsChildOf(bell)) { RingBell(); return; }
 
+        if (Current == State.Finished) { FreePlay(hits, screen); return; } // tap the kids, Santa, the tree or the snow
+
         if (!revealed || Time.time < nextTreePoke) return;
         foreach (var hit in hits)
             if (hit.collider.transform == tree) { PokeTree(hit.point); return; }
@@ -520,6 +524,7 @@ public class GreetingCardController : MonoBehaviour, ICardExperience
         Animator anim = kidAnims[k];
         yield return Face(kid, giftPos);
         anim.CrossFade("Cheer", 0.2f);
+        if (strong || Random.value < 0.6f) KidSay(k, strong ? "WOW! A rare one!" : WowLines[Random.Range(0, WowLines.Length)]);
         yield return new WaitForSeconds(strong ? 3.5f : 1.8f);
         yield return RunTo(kid, anim, kidHomes[k].localPosition);
         Quaternion from = kid.localRotation, home = kidHomes[k].localRotation;
@@ -558,6 +563,7 @@ public class GreetingCardController : MonoBehaviour, ICardExperience
         yield return RunTo(kids[k], kidAnims[k], spot);
         yield return Face(kids[k], santaPos);
         kidAnims[k].CrossFade("Wave", 0.2f);
+        KidSay(k, k % 2 == 0 ? "Hi Santa!" : "Santa!!");
         kidsArrived++;
     }
 
@@ -831,6 +837,8 @@ public class GreetingCardController : MonoBehaviour, ICardExperience
         yield return new WaitForSeconds(0.8f);
         SetState(State.Finished);
         StartCoroutine(ShowRecap());
+        StartCoroutine(LetterAfterRecap());
+        MakeTapTargets();
         StopKidRoutines();
         treeLights.Jiggle(1.5f); // the tree celebrates too
         fx.confettiRain.Play();
@@ -860,6 +868,7 @@ public class GreetingCardController : MonoBehaviour, ICardExperience
         yield return Ease.Run(0.3f, t => santa.localRotation = Quaternion.Slerp(from, toCamera, Ease.OutCubic(t)));
         santaAnim.CrossFade("Wave", 0.25f);
         foreach (var anim in kidAnims) anim.CrossFade("Wave", 0.25f);
+        for (int k = 0; k < kids.Length; k++) KidSay(k, k % 2 == 0 ? "Bye Santa!" : "Thank you!", 2.4f);
         PlaySfx(bellClip ? bellClip : sparkleClip, 0.7f);
         yield return new WaitForSeconds(2.8f);
 
@@ -1100,7 +1109,7 @@ public class GreetingCardController : MonoBehaviour, ICardExperience
         {
             case State.Scanned: guideText.text = "Card found! Tap Start to begin"; break;
             case State.HouseUp:
-                guideText.text = houseReady ? "Tap \"Get Your Gift\" to call Santa!" : "A snowy house is appearing...";
+                guideText.text = houseReady ? Greeting + "\nTap \"Get Your Gift\" to call Santa!" : "A snowy house is appearing...";
                 break;
             case State.SantaArriving: guideText.text = "Here comes Santa!\nWatch the chimney..."; break;
             case State.Reveal: guideText.text = "Let's peek inside!"; break;
@@ -1144,6 +1153,7 @@ public class GreetingCardController : MonoBehaviour, ICardExperience
         bell.gameObject.SetActive(false);
         bell.localScale = bellScale;
         rings = 0;
+        ResetExtras();
         fx.StopAll();
         music.Stop();
         music.clip = mainMusic;
