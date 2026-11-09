@@ -25,3 +25,7 @@
 .DS_Store
 Thumbs.db
 /.utmp/
+
+# Vuforia licence keys: kept on this machine only, never committed
+/Assets/Resources/VuforiaConfiguration.asset
+/Assets/Resources/VuforiaConfiguration.asset.meta
