@@ -323,59 +323,323 @@ def fire_crackle():
 
 # ------------------------------------------------------------------ business card
 
-def soft_pad(midis, dur, amp=0.05):
-    """A pad whose whole length is one smooth swell, so neighbouring chords melt into each other."""
-    n = int(dur * SR)
-    out = [0.0] * n
-    for m in midis:
-        w = 2 * math.pi * hz(m) / SR
-        for i in range(n):
-            env = math.sin(math.pi * i / n) ** 2
-            out[i] += amp * env * (math.sin(w * i) + 0.2 * math.sin(2 * w * i))
+# The business card's music: a lo-fi hip-hop loop played like a person would. Jazzy electric-piano chords
+# (FM Rhodes) with a little strum and uneven touch, a plucked bass, swung brushy drums with ghost notes, a
+# written melody, and tape wobble plus vinyl crackle on top. 16 bars at 78 BPM (about 49 s), loops seamlessly.
+# Bars 0-3 are a light intro (no kick), the melody plays bars 4-11, bars 12-15 are the groove alone.
+LOFI_BPM = 78
+
+
+def rhodes(midi, dur, vel, bright=1.0):
+    """FM electric piano: the bark of the hammer fades into a round tone with a faint bell tine on top."""
+    f, n = hz(midi), int((dur + 0.25) * SR)
+    w, out = 2 * math.pi * f / SR, []
+    rel = int(0.08 * SR)
+    end = int(dur * SR)
+    for i in range(n):
+        t = i / SR
+        index = (1.6 * math.exp(-t * 5.5) + 0.35) * vel * bright
+        env = min(1, i / (0.004 * SR)) * math.exp(-t * 1.5)
+        if i > end:
+            env *= max(0, 1 - (i - end) / rel)
+        tone = math.sin(w * i + index * math.sin(w * i))
+        tine = 0.1 * math.exp(-t * 11) * math.sin(4.0 * w * i)
+        out.append(0.16 * vel * env * (tone + tine))
     return out
 
 
-def biz_ambient():
-    """Calm and a little techy: slow chords, a soft low note on each, sparse high plucks. 12 s, loops seamlessly."""
-    dur = 12.0
-    out = silence(dur)
-    chords = [[57, 64, 67, 71], [53, 60, 64, 69], [48, 55, 59, 64], [55, 62, 67, 71]]
-    for k, chord in enumerate(chords):
-        mix(out, soft_pad(chord, 4.5), k * 3.0 - 0.75, wrap=True)
-        mix(out, bass(chord[0] - 12, 2.8, 0.16), k * 3.0, wrap=True)
-    t = 1.0
-    while t < dur:
-        mix(out, bell(random.choice([81, 84, 88, 76, 79]), 1.8, 0.07), t, wrap=True)
-        t += random.uniform(1.2, 2.6)
+def pluck_bass(midi, dur, vel):
+    f, n = hz(midi), int((dur + 0.08) * SR)
+    w, out, y = 2 * math.pi * f / SR, [], 0.0
+    end = int(dur * SR)
+    for i in range(n):
+        t = i / SR
+        env = min(1, i / (0.006 * SR)) * math.exp(-t * 2.0)
+        if i > end:
+            env *= max(0, 1 - (i - end) / (0.08 * SR))
+        x = math.sin(w * i) + 0.28 * math.sin(2 * w * i) + 0.08 * math.sin(3 * w * i)
+        y += 0.35 * (x - y)  # soften the edges, like fingers on a string
+        out.append(0.3 * vel * env * y)
+    return out
+
+
+def lofi_kick(vel):
+    out, ph = [], 0.0
+    for i in range(int(0.35 * SR)):
+        t = i / SR
+        f = 48 + 70 * math.exp(-t * 30)
+        ph += 2 * math.pi * f / SR
+        out.append(0.62 * vel * math.exp(-t * 11) * math.sin(ph))
+    for i in range(int(0.004 * SR)):
+        out[i] += 0.12 * vel * random.uniform(-1, 1)
+    return out
+
+
+def lofi_snare(vel, ghost=False):
+    """Soft and dusty, closer to a brush than a crack."""
+    n = int(0.28 * SR)
+    out, y = [], 0.0
+    for i in range(n):
+        t = i / SR
+        y += 0.45 * (random.uniform(-1, 1) - y)
+        body = 0.12 * math.exp(-t * 35) * math.sin(2 * math.pi * 185 * t)
+        out.append(vel * (0.24 * math.exp(-t * 16) * y + body) * (0.45 if ghost else 1))
+    return out
+
+
+def lofi_hat(vel, open_=False):
+    n = int((0.3 if open_ else 0.06) * SR)
+    out, prev = [], 0.0
+    for i in range(n):
+        x = random.uniform(-1, 1)
+        hp, prev = x - prev, x  # high-passed noise
+        out.append(0.05 * vel * math.exp(-i / SR * (9 if open_ else 55)) * hp)
+    return out
+
+
+def biz_lofi():
+    beat = 60.0 / LOFI_BPM
+    bar = 4 * beat
+    bars = 16
+    n = int(bars * bar * SR)
+    dur = n / SR
+    rng = random.Random(11)
+    keys, low, drums = [0.0] * n, [0.0] * n, [0.0] * n
+
+    def at(b, x):  # bar b, beat x, with a little human timing slop
+        return (b * 4 + x) * beat + rng.uniform(-0.012, 0.012)
+
+    def swing(x):  # swung 8ths: the off-beat lands late
+        return x + (0.09 if (x * 2) % 2 == 1 else 0)
+
+    # Fmaj9 | Em7 A7b9 | Dm9 | Gm9 C13   (voicings flow into each other)
+    prog = [
+        [(0, 41, [57, 64, 67, 72])],
+        [(0, 40, [55, 59, 62, 64]), (2, 45, [55, 58, 61, 64])],
+        [(0, 38, [53, 57, 60, 64])],
+        [(0, 43, [53, 57, 58, 62]), (2, 36, [52, 57, 58, 62])],
+    ]
+    comps = [[(0, 1.9), (2.5, 0.6)], [(0, 1.4), (1.75, 0.2), (2.5, 1.2)], [(0, 2.4), (3.5, 0.45)], [(0, 1.0), (1.5, 0.4), (2.5, 1.3)]]
+    kicks = []
+    for b in range(bars):
+        chords = prog[b % 4]
+        comp = comps[(b + b // 4) % len(comps)]  # the rhythm shifts each time round, so the bars never repeat exactly
+        for start, length in comp:
+            # the chord sounding at this point of the bar
+            root, voicing = chords[0][1], chords[0][2]
+            for cs, r, v in chords:
+                if start >= cs:
+                    root, voicing = r, v
+            length = min(length, 4 - start) if len(chords) == 1 else min(length, (2 if start < 2 else 4) - start)
+            vel = rng.uniform(0.75, 1.0) * (1 if start == 0 else 0.8)
+            t0 = at(b, start)
+            for k, m in enumerate(voicing):  # rolled from the bottom up, unevenly
+                mix(keys, rhodes(m, length * beat, vel * rng.uniform(0.85, 1.05)), t0 + k * rng.uniform(0.008, 0.022), wrap=True)
+        # bass: root on 1, a push on the and-of-2 or a walk-up into the next chord
+        for cs, r, _ in chords:
+            mix(low, pluck_bass(r, (1.4 if len(chords) == 2 else 2.2) * beat, rng.uniform(0.85, 1.0)), at(b, cs), wrap=True)
+        if len(chords) == 1:
+            nxt = prog[(b + 1) % 4][0][1]
+            mix(low, pluck_bass(chords[0][1] + 7, 0.45 * beat, 0.7), at(b, swing(2.5)), wrap=True)
+            mix(low, pluck_bass(nxt + (1 if rng.random() < 0.5 else -1), 0.4 * beat, 0.65), at(b, swing(3.5)), wrap=True)
+
+        # drums
+        intro = b < 4
+        if not intro:
+            for x in ([0, 2.5] if b % 2 == 0 else [0, 1.75, 2.5]):
+                t = at(b, x)
+                kicks.append(t)
+                mix(drums, lofi_kick(rng.uniform(0.85, 1.0)), t, wrap=True)
+        for x in (1, 3):
+            mix(drums, lofi_snare(rng.uniform(0.8, 1.0) * (0.6 if intro else 1)), at(b, x) + 0.015, wrap=True)  # laid back
+        if not intro and rng.random() < 0.6:
+            mix(drums, lofi_snare(0.6, ghost=True), at(b, swing(3.5) + 0.25), wrap=True)
+        for k in range(8):
+            x = swing(k * 0.5)
+            open_ = b % 4 == 3 and k == 7
+            mix(drums, lofi_hat((1.0 if k % 2 == 0 else 0.6) * rng.uniform(0.7, 1.0), open_), at(b, x), wrap=True)
+
+    # the tune, written out (bar, beat, note, beats), played an octave up on the same piano, a little softer
+    tune = [
+        (0, 1.0, 72, 0.5), (0, 1.5, 69, 0.5), (0, 2.0, 67, 1.5),
+        (1, 0.5, 67, 0.5), (1, 1.0, 69, 0.5), (1, 1.5, 71, 0.75), (1, 2.5, 73, 0.5), (1, 3.0, 76, 1.0),
+        (2, 0.0, 77, 1.5), (2, 2.0, 76, 0.5), (2, 2.5, 72, 0.5), (2, 3.0, 69, 1.0),
+        (3, 0.5, 70, 0.5), (3, 1.0, 69, 0.5), (3, 1.5, 67, 1.0), (3, 3.0, 65, 0.5), (3, 3.5, 67, 0.5),
+        (4, 0.0, 69, 1.0), (4, 1.5, 72, 0.5), (4, 2.0, 76, 1.0), (4, 3.0, 74, 0.5),
+        (5, 0.0, 74, 1.0), (5, 1.5, 71, 0.5), (5, 2.5, 73, 0.5), (5, 3.0, 70, 1.0),
+        (6, 0.0, 69, 2.0), (6, 2.5, 65, 0.5), (6, 3.0, 64, 0.5), (6, 3.5, 65, 0.5),
+        (7, 0.0, 62, 1.0), (7, 1.0, 65, 0.5), (7, 1.5, 67, 2.0),
+    ]
+    for bb, x, m, length in tune:
+        vel = rng.uniform(0.6, 0.8)
+        mix(keys, rhodes(m + 12, length * beat * 1.1, vel * 0.85, bright=1.0), at(4 + bb, swing(x)), wrap=True)
+
+    # the keys duck a touch under each kick, like an old sampler pumping
+    duck = [1.0] * n
+    for t in kicks:
+        i0 = int(t * SR)
+        for i in range(int(0.25 * SR)):
+            j = (i0 + i) % n
+            duck[j] = min(duck[j], 1 - 0.28 * math.exp(-i / SR / 0.07))
+    mixdown = [keys[i] * duck[i] + low[i] + 0.85 * drums[i] for i in range(n)]
+
+    # warm it: a gentle low-pass, run twice round the loop so the start and end match
+    y, a = 0.0, 0.45
+    for _ in range(2):
+        for i in range(n):
+            y += a * (mixdown[i] - y)
+            mixdown[i] = y
+
+    # tape wobble: the read point drifts slowly (whole cycles per loop, so it still loops)
+    wobbled = [0.0] * n
+    for i in range(n):
+        ph = i / n
+        d = SR * (0.004 + 0.0018 * math.sin(2 * math.pi * 19 * ph) + 0.0004 * math.sin(2 * math.pi * 211 * ph))
+        pos = i - d
+        k = math.floor(pos)
+        f = pos - k
+        wobbled[i] = mixdown[k % n] * (1 - f) + mixdown[(k + 1) % n] * f
+
+    # vinyl: a quiet hiss with soft clicks and the odd pop
+    y = 0.0
+    for i in range(n):
+        y += 0.2 * (rng.uniform(-1, 1) - y)
+        wobbled[i] += 0.006 * y
+    for _ in range(int(dur * 4)):
+        i = rng.randrange(n)
+        amp = rng.uniform(0.02, 0.07) * (3 if rng.random() < 0.05 else 1)
+        for k in range(rng.randint(2, 5)):
+            wobbled[(i + k) % n] += amp * rng.choice((-1, 1)) * (0.6 ** k)
+    return wobbled
+
+
+# ------------------------------------------------------------------ business card effects
+# (open, pulse and power-up are Kenney's Interface Sounds, CC0, copied into Assets/Resources/Audio by hand.)
+# Built from physical-sounding parts instead of clean beeps: noise through resonant filters (a key, a slap, air),
+# the same electric piano as the music (in its key, F major), and metal-bar chimes with uneven partials.
+# Every note is a little off in time and loudness, like a hand played it.
+
+def bandpass(x, f, q, f_end=None):
+    """Resonant band-pass (RBJ biquad). With f_end the centre sweeps from f to f_end across the sound."""
+    out, x1, x2, y1, y2, n = [], 0.0, 0.0, 0.0, 0.0, len(x)
+    for i, v in enumerate(x):
+        fc = f if f_end is None else f * (f_end / f) ** (i / n)
+        w = 2 * math.pi * fc / SR
+        al = math.sin(w) / (2 * q)
+        b0, a0, a1, a2 = al, 1 + al, -2 * math.cos(w), 1 - al
+        y = (b0 * v - b0 * x2 - a1 * y1 - a2 * y2) / a0
+        x2, x1, y2, y1 = x1, v, y1, y
+        out.append(y)
+    return out
+
+
+def burst(dur, decay, rng):
+    return [rng.uniform(-1, 1) * math.exp(-decay * i / SR) for i in range(int(dur * SR))]
+
+
+def key_click(rng, vel=1.0):
+    """A mechanical keyboard key: the click going down, the plastic thock, then a softer bottom-out."""
+    out = silence(0.14)
+    for at, v in ((0.0, 1.0), (0.022 + rng.uniform(0, 0.006), 0.45)):
+        tail = [0.0] * int(0.06 * SR)  # room for the filters to ring out after the tap
+        click = bandpass(burst(0.012, 300, rng) + tail, 2800 * rng.uniform(0.9, 1.1), 1.8)
+        thock = bandpass(burst(0.006, 900, rng) + tail, 380 * rng.uniform(0.95, 1.05), 9)
+        mix(out, [vel * v * 0.5 * c for c in click], at)
+        mix(out, [vel * v * 1.6 * t for t in thock], at)
+    return out
+
+
+def chime(midi, rng, amp=0.2, dur=1.4):
+    """A small metal bar: its overtones are not whole multiples, which is what makes it sound real."""
+    f0, n = hz(midi), int(dur * SR)
+    out = [0.0] * n
+    for ratio, a, decay in ((1, 1.0, 2.2), (2.756, 0.5, 4.5), (5.404, 0.22, 9.0)):
+        f = f0 * ratio * rng.uniform(0.997, 1.003)
+        if f > SR / 2 - 800:
+            continue
+        w, ph = 2 * math.pi * f / SR, rng.uniform(0, 6.28)
+        for i in range(n):
+            out[i] += amp * a * math.exp(-decay * i / SR) * math.sin(w * i + ph)
+    for i in range(min(n, int(0.002 * SR))):
+        out[i] *= i / (0.002 * SR)
     return out
 
 
 def biz_tick():
-    out = bell(98, 0.3, 0.45)
-    mix(out, noise(0.012, 0.25, 0), 0)
+    """Taps and small UI moves: one key press."""
+    return key_click(random.Random(3))
+
+
+def biz_pop():
+    """A soft mouth pop (a cheek flick): a short blip that bends up, with a puff of air."""
+    rng = random.Random(17)
+    n = int(0.12 * SR)
+    out, ph = [], 0.0
+    for i in range(n):
+        t = i / SR
+        ph += 2 * math.pi * (380 + 700 * (1 - math.exp(-t * 60))) / SR
+        out.append(0.7 * math.exp(-t * 38) * math.sin(ph))
+    mix(out, [0.25 * v for v in bandpass(burst(0.02, 200, rng), 1500, 1.0)], 0)
     return out
 
 
-def biz_open():
+def biz_sparkle():
+    """A few wind chimes brushed by a hand: notes of F major pentatonic, unevenly spaced and loud."""
+    rng = random.Random(21)
+    out = silence(1.8)
+    t = 0.0
+    for m in (84, 81, 88, 86, 91, 84):
+        mix(out, chime(m, rng, rng.uniform(0.08, 0.16), 1.3), t)
+        t += rng.uniform(0.03, 0.09)
+    return out
+
+
+def splat():
+    """Bug Hunt: the swatter's slap on the card and a little wet squish under it."""
+    rng = random.Random(25)
+    out = silence(0.35)
+    slap = bandpass(burst(0.03, 160, rng), 1300, 0.8)
+    mix(out, [1.2 * v for v in slap], 0)
+    mix(out, [0.5 * math.exp(-i / SR * 40) * math.sin(2 * math.pi * 130 * i / SR) for i in range(int(0.08 * SR))], 0)
+    squish = bandpass([rng.uniform(-1, 1) * math.sin(math.pi * i / (0.2 * SR)) for i in range(int(0.2 * SR))], 900, 3.5, 260)
+    mix(out, [0.9 * v for v in squish], 0.02)
+    return out
+
+
+def biz_rumble():
+    """Easter egg: the rocket's engine, a low rolling roar that swells and crackles."""
+    rng = random.Random(29)
+    n = int(1.6 * SR)
+    out, y, y2 = [], 0.0, 0.0
+    for i in range(n):
+        t = i / SR
+        y += 0.08 * (rng.uniform(-1, 1) - y)     # deep roar
+        y2 += 0.5 * (rng.uniform(-1, 1) - y2)    # hiss of the flame
+        env = min(1, t / 0.5) * min(1, (1.6 - t) / 0.4)
+        out.append(env * (2.2 * y + 0.15 * y2) * (1 + 0.25 * math.sin(2 * math.pi * 9 * t)))
+    for _ in range(25):  # crackles
+        mix(out, [0.25 * v for v in bandpass(burst(0.01, 400, rng), rng.uniform(800, 2500), 2)], rng.uniform(0.1, 1.4))
+    return out
+
+
+def biz_bang():
+    """Easter egg: a firework going off, a thump and a crack with sparks fizzling after."""
+    rng = random.Random(31)
+    out = silence(1.4)
+    mix(out, [0.9 * math.exp(-i / SR * 14) * math.sin(2 * math.pi * (60 + 40 * math.exp(-i / SR * 20)) * i / SR) for i in range(int(0.4 * SR))], 0)
+    mix(out, [1.0 * v for v in bandpass(burst(0.05, 70, rng), 900, 0.6)], 0)
+    for _ in range(40):
+        mix(out, [0.12 * v for v in bandpass(burst(0.006, 600, rng), rng.uniform(2500, 6000), 3)], rng.uniform(0.15, 1.2) ** 1.5)
+    return out
+
+
+def biz_drum():
+    """Bug Hunt countdown: a deep floor-tom hit, a pitch-dropping thump with a felt beater click and a short room tail."""
+    rng = random.Random(37)
     out = silence(0.9)
-    for k, m in enumerate((79, 86, 91)):
-        mix(out, bell(m, 0.8, 0.3 - 0.04 * k), k * 0.07)
-    mix(out, noise(0.5, 0.08, 6, smooth=0.9), 0)
-    return out
-
-
-def biz_pulse():
-    out = silence(1.0)
-    mix(out, sweep(500, 2400, 0.5, 0.35, decay=4.0, curve=1.6), 0)
-    mix(out, bell(98, 0.6, 0.25), 0.42)
-    return out
-
-
-def biz_powerup():
-    out = silence(1.9)
-    mix(out, sweep(180, 1600, 1.0, 0.3, decay=1.0, curve=2.0), 0)
-    for m in (72, 76, 79, 84):
-        mix(out, bell(m, 1.4, 0.22), 0.95)
+    mix(out, [math.exp(-i / SR * 7) * math.sin(2 * math.pi * (52 * i / SR + 55 / 18 * (1 - math.exp(-i / SR * 18)))) for i in range(int(0.8 * SR))], 0)
+    mix(out, [0.6 * v for v in bandpass(burst(0.02, 220, rng), 1800, 1.2)], 0)
+    mix(out, [0.25 * v for v in bandpass(burst(0.5, 9, rng), 300, 0.7)], 0.005)
     return out
 
 
@@ -395,8 +659,15 @@ if __name__ == "__main__":
     write(folder, "tree_jingle.wav", tree_tap())
     write(folder, "hand_bell_ring.wav", hand_bell())
     write(folder, "fire_crackle_loop.wav", fire_crackle(), peak=0.8, fade=False)
-    write(folder, "biz_ambient_loop.wav", biz_ambient(), peak=0.7, fade=False)
+    write(folder, "biz_ambient_loop.wav", biz_lofi(), peak=0.7, fade=False)
     write(folder, "biz_tick.wav", biz_tick(), peak=0.7)
-    write(folder, "biz_open.wav", biz_open(), peak=0.7)
-    write(folder, "biz_pulse.wav", biz_pulse(), peak=0.7)
-    write(folder, "biz_powerup.wav", biz_powerup(), peak=0.75)
+    # business-card-only sounds loaded at runtime with Resources.Load (pop and sparkle replace the shared ones
+    # for the business card only), so they live under Assets/Resources/Audio
+    res = os.path.join(folder, "..", "Resources", "Audio")
+    os.makedirs(res, exist_ok=True)
+    write(res, "biz_splat.wav", splat(), peak=0.75)
+    write(res, "biz_pop.wav", biz_pop(), peak=0.6)
+    write(res, "biz_sparkle.wav", biz_sparkle(), peak=0.6)
+    write(res, "biz_rumble.wav", biz_rumble(), peak=0.7)
+    write(res, "biz_bang.wav", biz_bang(), peak=0.8)
+    write(res, "biz_drum.wav", biz_drum(), peak=0.85)

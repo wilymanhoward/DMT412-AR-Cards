@@ -10,6 +10,9 @@ public class SeatedPose : MonoBehaviour
     public Material codeMat;          // the scrolling code on the screen
     public Vector2 playerRange;       // local x range of the hop, and the floor y (x = min, y = max)
     public float playerFloor, hop = 0.006f;
+    [HideInInspector] public float typing = 1f;
+    [HideInInspector] public float seated = 1f; // 0 lets go of the chair, floor and keyboard (the parachute ride)
+    float typePhase;
 
     Animator anim;
     float left = 1, right = 1;
@@ -33,9 +36,10 @@ public class SeatedPose : MonoBehaviour
             player.localPosition = new Vector3(x, playerFloor + Mathf.Abs(Mathf.Sin(Time.time * 5f)) * hop, playerStart.z);
         }
 
-        // typing: the hands tap in turn
-        handL.localPosition = handLRest + Vector3.up * Mathf.Max(0, Mathf.Sin(Time.time * 21f)) * 0.003f;
-        handR.localPosition = handRRest + Vector3.up * Mathf.Max(0, Mathf.Sin(Time.time * 21f + 2.4f)) * 0.003f;
+        // typing: the hands tap in turn (faster as `typing` goes up; Bug Hunt speeds him up)
+        typePhase += Time.deltaTime * 21f * typing;
+        handL.localPosition = handLRest + Vector3.up * Mathf.Max(0, Mathf.Sin(typePhase)) * 0.003f;
+        handR.localPosition = handRRest + Vector3.up * Mathf.Max(0, Mathf.Sin(typePhase + 2.4f)) * 0.003f;
 
         var info = anim.IsInTransition(0) ? anim.GetNextAnimatorStateInfo(0) : anim.GetCurrentAnimatorStateInfo(0);
         float l = 1, r = 1;
@@ -48,14 +52,14 @@ public class SeatedPose : MonoBehaviour
 
     void OnAnimatorIK(int layer)
     {
-        Goal(AvatarIKGoal.LeftFoot, footL, 1, true);
-        Goal(AvatarIKGoal.RightFoot, footR, 1, true);
-        Hint(AvatarIKHint.LeftKnee, kneeL, 1);
-        Hint(AvatarIKHint.RightKnee, kneeR, 1);
-        Goal(AvatarIKGoal.LeftHand, handL, left, false);
-        Goal(AvatarIKGoal.RightHand, handR, right, false);
-        Hint(AvatarIKHint.LeftElbow, elbowL, left);
-        Hint(AvatarIKHint.RightElbow, elbowR, right);
+        Goal(AvatarIKGoal.LeftFoot, footL, seated, true);
+        Goal(AvatarIKGoal.RightFoot, footR, seated, true);
+        Hint(AvatarIKHint.LeftKnee, kneeL, seated);
+        Hint(AvatarIKHint.RightKnee, kneeR, seated);
+        Goal(AvatarIKGoal.LeftHand, handL, left * seated, false);
+        Goal(AvatarIKGoal.RightHand, handR, right * seated, false);
+        Hint(AvatarIKHint.LeftElbow, elbowL, left * seated);
+        Hint(AvatarIKHint.RightElbow, elbowR, right * seated);
         anim.SetLookAtWeight(0.6f, 0.2f, 0.8f);
         anim.SetLookAtPosition(lookAt.position);
     }

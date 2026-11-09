@@ -100,6 +100,15 @@ def next_(x, y):
     return line(x, y, [(-0.1, 0.27), (0.14, 0), (-0.1, -0.27)], 0.1)
 
 
+def trophy(x, y):
+    """The achievement popup's cup (written to Assets/Resources/Icons, loaded at runtime)."""
+    cup = rbox(x, y, 0, 0.14, 0.2, 0.2, 0.12)
+    handles = min(ring(circle(x, y, -0.2, 0.17, 0.09), 0.05), ring(circle(x, y, 0.2, 0.17, 0.09), 0.05))
+    stem = rbox(x, y, 0, -0.12, 0.045, 0.08, 0.02)
+    base = rbox(x, y, 0, -0.26, 0.17, 0.055, 0.03)
+    return min(cup, handles, stem, base)
+
+
 ICONS = {"icon_mail": mail, "icon_phone": phone, "icon_globe": globe, "icon_close": close, "icon_about": about,
          "icon_skills": skills, "icon_portfolio": portfolio, "icon_prev": prev, "icon_next": next_}
 

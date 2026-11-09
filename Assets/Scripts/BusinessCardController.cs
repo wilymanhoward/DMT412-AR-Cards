@@ -3,7 +3,7 @@ using System.Linq;
 using UnityEngine;
 
 // "Howard's Node Network": the network printed on the business card comes alive in 3D.
-//   Idle → Intro → Hub ⇄ Panel (a 3D scene above the node)
+//   Idle → Intro → Hub ⇄ Panel (a 3D scene above the node) or Game (Bug Hunt, BusinessCardController.BugHunt.cs)
 // Intro: the HW block lifts off the card, the network draws itself out to four glowing nodes, and a mini-me
 // arrives and says hello. Hub: tap a node (About, Skills, Portfolio, Contact) and a pulse of light runs along the
 // line to it while its 3D scene grows above it; tap the logo to spin it, or the mini-me to make him wave.
@@ -12,7 +12,7 @@ using UnityEngine;
 // CardHub decides when the card is found or lost; losing it pauses everything and progress is kept.
 public partial class BusinessCardController : MonoBehaviour, ICardExperience
 {
-    public enum State { Idle, Intro, Hub, Panel }
+    public enum State { Idle, Intro, Hub, Panel, Game }
 
     [System.Serializable]
     public class Hub
@@ -72,6 +72,14 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
     void Awake()
     {
         data = BusinessCardContent.Load();
+        // the business card's own sounds in Resources/Audio: pop and sparkle from Tools/make_audio.py (the Christmas
+        // card keeps the shared ones), open, pulse and power-up from Kenney's Interface Sounds (CC0)
+        void Own(ref AudioClip clip, string name) { var c = Resources.Load<AudioClip>("Audio/" + name); if (c) clip = c; }
+        Own(ref popClip, "biz_pop");
+        Own(ref sparkleClip, "biz_sparkle");
+        Own(ref openClip, "biz_open");
+        Own(ref pulseClip, "biz_pulse");
+        Own(ref powerupClip, "biz_powerup");
         logoRest = logo.localPosition;
         logoScale = logo.localScale;
         avatarScale = avatar.localScale;
@@ -81,6 +89,8 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         foreach (var h in hubs) { h.rest = h.node.localPosition; h.baseScale = h.node.localScale; }
         BuildUI();
         BuildStages();
+        BuildBugHunt();
+        BuildRocket();
         ResetScene();
     }
 
@@ -142,6 +152,8 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         music.Stop();
         project = 0;
         ResetGallery();
+        ResetBugHunt();
+        ResetRocket();
         ResetUi();
     }
 
@@ -250,18 +262,24 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         }
 
         UpdateStages(t, dt);
+        UpdateBugHuntInvite(t, dt);
+        UpdateRocket(t, dt);
+        if (Current == State.Game) { UpdateBugHunt(t, dt); return; }
         if (turning) TurnAvatar();
-        else if (Current >= State.Hub && !busy && TapInput.Started(out Vector2 screen)) HandleTap(screen);
+        else if (Current >= State.Hub && !busy && !rocketing && TapInput.Started(out Vector2 screen)) HandleTap(screen);
     }
 
     // The idle motion that keeps it alive: everything bobs a little, the diamonds turn, the logo sways.
     void Float(float t, float dt)
     {
+        if (rocketing) return; // the easter egg is flying them (BusinessCardController.Rocket.cs)
         logo.localPosition = logoRest + Vector3.up * (0.008f * Mathf.Sin(t * 1.6f));
+        if (charge >= 2) logo.localPosition += Random.insideUnitSphere * (0.0015f * charge); // charging: it shakes
         logo.localRotation = Quaternion.Euler(0, 10f * Mathf.Sin(t * 0.7f) + logoSpin, 0);
         for (int i = 0; i < hubs.Length; i++)
         {
-            hubs[i].node.localPosition = hubs[i].rest + Vector3.up * (0.007f * Mathf.Sin(t * 2f + i * 1.7f));
+            hubs[i].node.localPosition = hubs[i].rest + Vector3.up * (0.007f * Mathf.Sin(t * 2f + i * 1.7f))
+                                       + (logoRest - hubs[i].rest) * (0.012f * Mathf.Max(0, charge - 1)); // leaning toward a charging logo
             hubs[i].node.Rotate(0, 40f * dt, 0, Space.Self);
         }
     }
@@ -276,7 +294,8 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
             var h = hubs[i];
             Vector3 to = h.node.localPosition;
             SetLine(h.spoke, from, Vector3.Lerp(from, to, h.grow), h.grow > 0.001f);
-            SetLine(h.stem, to, Vector3.Lerp(to, new Vector3(h.rest.x, 0.002f, h.rest.z), h.grow), h.grow > 0.001f && h.pop > 0.001f);
+            StyleSpoke(i, Time.time);
+            SetLine(h.stem, to, Vector3.Lerp(to, new Vector3(h.rest.x, 0.002f, h.rest.z), h.grow), h.grow > 0.001f && h.pop > 0.001f && !StemCut(i));
         }
         for (int i = 0; i < ring.Length; i++)
         {
@@ -300,6 +319,9 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
     {
         var hits = Physics.RaycastAll(arCamera.ScreenPointToRay(screen), 100f);
         System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+        // his monitor starts Bug Hunt even when he is in front of it (he sits between you and the screen)
+        if (!System.Array.Exists(hits, h => h.collider.transform.IsChildOf(logo))) CancelCharge(); // tapped away from a charging logo
+        if (TappedMonitor(hits)) { StartCoroutine(BugHuntRoutine()); return; }
         foreach (var hit in hits)
         {
             Transform t = hit.collider.transform;
@@ -307,7 +329,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
             if (tap) { tap.onTap(); return; }
             for (int i = 0; i < hubs.Length; i++)
                 if (t.IsChildOf(hubs[i].node)) { OpenPanel(i); return; }
-            if (t.IsChildOf(logo)) { StartCoroutine(SpinLogo()); return; }
+            if (t.IsChildOf(logo)) { LogoTap(); return; } // 5 quick taps: the easter egg
             if (t.IsChildOf(avatar)) { turning = true; turned = false; turnStart = screen; turnFrom = avatar.localEulerAngles.y; turnPivot = avatar.localPosition + CentreOffset(turnFrom); return; }
         }
         if (Current == State.Panel) ClosePanel(); // a tap on nothing closes what is open
@@ -355,7 +377,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         while (true)
         {
             yield return new WaitForSeconds(Random.Range(2.5f, 4.5f));
-            if (Current == State.Hub && !pulsing) yield return PulseTo(Random.Range(0, hubs.Length), 0.9f);
+            if (Current == State.Hub && !pulsing && !rocketing) yield return PulseTo(Random.Range(0, hubs.Length), 0.9f);
         }
     }
 

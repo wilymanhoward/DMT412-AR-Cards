@@ -4,14 +4,14 @@ using UnityEngine;
 
 // What a node opens: a small 3D scene that grows out above it and stays on the card, built here from primitives.
 //   About     a name board with Howard's tagline and interests
-//   Skills    skill blocks orbiting the node; tap one to pop it
+//   Skills    skill blocks circling the node; tap one to pop it
 //   Portfolio takes over the whole card as a gallery (BusinessCardController.Gallery.cs)
 //   Contact   an envelope, a phone and a globe; tap one to use it
 // Words and pictures come from business_card.json. Sizes are in card units (the card is 1 wide, 0.6 deep).
 public partial class BusinessCardController
 {
     const float TextScale = 1f; // multiplies every 3D text size; the one number to change if the words look too big or small
-    const float StageHeight = 0.19f;
+    const float StageHeight = 0.28f; // high enough that every scene clears its own diamond (top about 0.14)
 
     Transform[] stageRoot;
     int openStage = -1;
@@ -34,7 +34,7 @@ public partial class BusinessCardController
             root.SetParent(content, false);
             root.localPosition = new Vector3(hubs[i].rest.x, StageHeight, hubs[i].rest.z);
             stageRoot[i] = root;
-            ui.tags[i] = NewSign(content, hubs[i].title, 0.03f, Cream, Navy).gameObject;
+            ui.tags[i] = NewSign(content, hubs[i].title, 0.026f, Cream, Navy).gameObject;
             ui.tags[i].SetActive(false);
         }
         BuildAbout(stageRoot[0]);
@@ -80,16 +80,19 @@ public partial class BusinessCardController
     {
         for (int i = 0; i < hubs.Length; i++)
         {
-            ui.tags[i].transform.localPosition = hubs[i].node.localPosition + Vector3.up * 0.05f;
-            ui.tags[i].transform.localScale = Vector3.one * hubs[i].pop * (selected == i ? 0 : 1);
+            ui.tags[i].transform.localPosition = hubs[i].node.localPosition + Vector3.up * (hubs[i].node.localScale.y + 0.04f); // diamond tip (its scale is its half-height) plus half a sign and a gap
+            // while a scene is open every name sign steps aside, so none of them lands in the middle of it
+            ui.tags[i].transform.localScale = Vector3.one * hubs[i].pop * (selected < 0 && !gameOn ? 1 : 0);
         }
         if (openStage < 0) return;
 
         if (openStage == 1)
             for (int i = 0; i < skillItems.Length; i++)
             {
+                // a wide ring, every other block a step higher, so names passing each other don't pile up
                 float a = t * 0.7f + i * Mathf.PI * 2 / skillItems.Length;
-                skillItems[i].localPosition = new Vector3(Mathf.Cos(a) * 0.14f, 0.015f * Mathf.Sin(t * 2 + i), Mathf.Sin(a) * 0.1f);
+                float y = (i % 2 == 0 ? 0.03f : -0.03f) + 0.008f * Mathf.Sin(t * 2 + i);
+                skillItems[i].localPosition = new Vector3(Mathf.Cos(a) * 0.2f, y, Mathf.Sin(a) * 0.13f);
                 skillItems[i].GetChild(0).Rotate(0, 60 * dt, 0, Space.Self);
             }
         else if (openStage == 3)
@@ -105,8 +108,7 @@ public partial class BusinessCardController
         board.transform.SetParent(root, false);
         board.cam = arCamera;
         var tb = board.transform;
-        Prim(PrimitiveType.Cube, "Slab", tb, Vector3.zero, new Vector3(0.38f, 0.27f, 0.014f), Lit(Navy));
-        Prim(PrimitiveType.Cube, "Accent", tb, new Vector3(0, 0.125f, -0.0085f), new Vector3(0.38f, 0.016f, 0.004f), Lit(Orange, 0.6f));
+        Board(tb, new Vector2(0.38f, 0.27f));
         Text(tb, data.name, 0.038f, Cream, new Vector3(0, 0.07f, -0.01f));
         string tagline = Wrap(data.tagline, 22);
         Text(tb, tagline, 0.02f, Slate, new Vector3(0, 0.025f, -0.01f));
@@ -130,19 +132,19 @@ public partial class BusinessCardController
             var cube = Prim(PrimitiveType.Cube, "Block", item, Vector3.zero, Vector3.one * 0.045f, Lit(i % 2 == 0 ? Orange : Navy, 0.3f));
             Prim(PrimitiveType.Cube, "Edge", cube, Vector3.zero, Vector3.one * 1.001f, Lit(i % 2 == 0 ? Navy : Orange, 0f)).localScale = new Vector3(0.45f, 1.08f, 1.08f);
             AddTap(cube.gameObject, 1.9f, () => StartCoroutine(PopItem(cube)));
-            var label = NewSign(item, data.skills[i], 0.024f, Cream, Navy);
-            label.transform.localPosition = new Vector3(0, 0.05f, 0);
+            var label = NewSign(item, data.skills[i], 0.02f, Cream, Navy);
+            label.transform.localPosition = new Vector3(0, 0.045f, 0);
             skillItems[i] = item;
         }
     }
 
-    IEnumerator PopItem(Transform block)
+    IEnumerator PopItem(Transform block, float size = 0.045f) // size: its resting scale (skill blocks 0.045, contact models 1)
     {
         PlaySfx(popClip);
         Haptics.Buzz(20, Haptics.Light);
         Burst(block.position, 20);
-        yield return Ease.Run(0.4f, t => block.localScale = Vector3.one * 0.045f * (1 + 0.5f * Mathf.Sin(Mathf.PI * t)));
-        block.localScale = Vector3.one * 0.045f;
+        yield return Ease.Run(0.4f, t => block.localScale = Vector3.one * size * (1 + 0.5f * Mathf.Sin(Mathf.PI * t)));
+        block.localScale = Vector3.one * size;
     }
 
     // ---------- Contact ----------
@@ -158,18 +160,24 @@ public partial class BusinessCardController
         if (!string.IsNullOrEmpty(data.linkedin)) entries.Add(("LinkedIn", Globe, () => OpenLink(WebLink(data.linkedin))));
         if (!string.IsNullOrEmpty(data.github)) entries.Add(("GitHub", Globe, () => OpenLink(WebLink(data.github))));
 
+        var row = new GameObject("Row").AddComponent<Billboard>(); // turns to face you, so nothing lines up behind anything
+        row.transform.SetParent(root, false);
+        row.cam = arCamera;
         contactItems = new Transform[entries.Count];
         for (int i = 0; i < entries.Count; i++)
         {
             var (label, model, tap) = entries[i];
             var slot = new GameObject(label).transform;
-            slot.SetParent(root, false);
-            slot.localPosition = new Vector3((i - (entries.Count - 1) / 2f) * 0.16f, 0, 0);
+            slot.SetParent(row.transform, false);
+            slot.localPosition = new Vector3((i - (entries.Count - 1) / 2f) * 0.17f, 0, 0);
             var body = model(slot);
             contactItems[i] = body;
-            AddTap(body.gameObject, 1f, () => { StartCoroutine(PopItem(body)); tap(); });
-            var sign = NewSign(slot, label, 0.026f, Cream, Navy);
-            sign.transform.localPosition = new Vector3(0, -0.07f, 0);
+            AddTap(body.gameObject, 1f, () => { StartCoroutine(PopItem(body, 1f)); tap(); });
+            // the model's root is unscaled, so a size-1 box would cover the whole card: fit it to the model instead
+            body.GetComponent<BoxCollider>().size = new Vector3(0.12f, 0.11f, 0.06f);
+            var sign = NewSign(slot, label, 0.024f, Cream, Navy);
+            sign.face = false;
+            sign.transform.localPosition = new Vector3(0, -0.085f, -0.01f);
         }
     }
 
@@ -181,7 +189,7 @@ public partial class BusinessCardController
         foreach (float side in new[] { -1f, 1f })
         {
             var flap = Prim(PrimitiveType.Cube, "Flap", e, new Vector3(side * 0.024f, 0.014f, -0.0075f), new Vector3(0.062f, 0.007f, 0.004f), Lit(Orange, 0.6f));
-            flap.localRotation = Quaternion.Euler(0, 0, -side * 30f);
+            flap.localRotation = Quaternion.Euler(0, 0, side * 30f); // a V hanging from the top edge, like a real envelope flap
         }
         return e;
     }
@@ -267,10 +275,42 @@ public partial class BusinessCardController
         var sign = new GameObject("Sign " + s).AddComponent<Billboard>();
         sign.transform.SetParent(parent, false);
         sign.cam = arCamera;
-        sign.back = Prim(PrimitiveType.Cube, "Back", sign.transform, Vector3.zero, new Vector3(0, 0, 0.008f), Lit(backColour));
+        // a pill with a soft bevel and a thin glowing outline (orange round navy, a light edge round anything else)
+        var back = PanelObject("Back", sign.transform, Vector3.zero, 0.008f, Lit(backColour));
+        Color rimColour = backColour == Navy ? Orange : Color.Lerp(backColour, Color.white, 0.5f);
+        var rim = PanelObject("Rim", back.transform, new Vector3(0, 0, 0.25f), 1f, Lit(rimColour, 0.5f));
+        sign.back = back.transform;
+        sign.back.localScale = new Vector3(0, 0, 0.008f); // sized to the text by the Billboard
+        sign.panels = new[] { back, rim };
+        sign.margins = new[] { 0f, Mathf.Clamp(height * 0.08f, 0.0012f, 0.003f) };
         sign.text = Text(sign.transform, s, height, textColour, new Vector3(0, 0, -0.0065f));
-        sign.pad = new Vector2(height * 0.7f, height * 0.4f);
+        sign.pad = new Vector2(height * 0.8f, height * 0.45f);
         return sign;
+    }
+
+    // An empty rounded-panel object (its mesh comes from Billboard.PanelMesh), `depth` thick.
+    MeshFilter PanelObject(string name, Transform parent, Vector3 position, float depth, Material mat)
+    {
+        var go = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = position;
+        go.transform.localScale = new Vector3(1, 1, depth);
+        var r = go.GetComponent<MeshRenderer>();
+        r.sharedMaterial = mat;
+        r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        return go.GetComponent<MeshFilter>();
+    }
+
+    // A floating board `size` big (its face at z -0.007, toward the viewer): a soft drop shadow, a glowing
+    // orange rim, the navy slab with a slightly lighter inset face, and a pill accent bar along the top.
+    void Board(Transform parent, Vector2 size)
+    {
+        float w = size.x, h = size.y, r = 0.028f;
+        PanelObject("Shadow", parent, new Vector3(0.004f, -0.008f, 0.012f), 0.004f, Lit(Ink)).sharedMesh = Billboard.PanelMesh(w + 0.01f, h + 0.01f, r + 0.005f);
+        PanelObject("Rim", parent, new Vector3(0, 0, 0.002f), 0.014f, Lit(Orange, 0.7f)).sharedMesh = Billboard.PanelMesh(w + 0.007f, h + 0.007f, r + 0.0035f);
+        PanelObject("Slab", parent, Vector3.zero, 0.014f, Lit(Navy)).sharedMesh = Billboard.PanelMesh(w, h, r);
+        PanelObject("Face", parent, new Vector3(0, -0.008f, -0.0072f), 0.001f, Lit(Color.Lerp(Navy, Slate, 0.22f))).sharedMesh = Billboard.PanelMesh(w - 0.024f, h - 0.04f, r - 0.012f);
+        PanelObject("Accent", parent, new Vector3(0, h / 2 - 0.013f, -0.0078f), 0.002f, Lit(Orange, 0.8f)).sharedMesh = Billboard.PanelMesh(w * 0.35f, 0.007f, 0.0035f);
     }
 
     static string Wrap(string s, int max)

@@ -8,8 +8,8 @@ using UnityEngine;
 //   tap the big one to zoom it, and tap Back to bring the network back.
 public partial class BusinessCardController
 {
-    static readonly Vector3 FeaturedSpot = new Vector3(-0.13f, 0.05f, -0.02f), ZoomedSpot = new Vector3(0, 0.06f, -0.02f);
-    const float FrameHeight = 0.26f, ThumbScale = 0.45f, ZoomScale = 1.45f;
+    static readonly Vector3 FeaturedSpot = new Vector3(-0.13f, 0.05f, -0.02f), ZoomedSpot = new Vector3(0, 0.08f, -0.02f);
+    const float FrameHeight = 0.26f, ThumbScale = 0.45f, ZoomScale = 1.3f;
 
     bool gallery, busy, zoomed, pressing;
     Transform galleryFloor, galleryWallRoot;
@@ -33,7 +33,7 @@ public partial class BusinessCardController
 
         var wall = new GameObject("Gallery Wall").AddComponent<Billboard>();
         wall.transform.SetParent(content, false);
-        wall.transform.localPosition = new Vector3(0, 0.2f, 0);
+        wall.transform.localPosition = new Vector3(0, 0.28f, 0); // high enough that the lowest thumbnail and the caption stay above the floor
         wall.cam = arCamera;
         galleryWallRoot = wall.transform;
 
@@ -58,18 +58,19 @@ public partial class BusinessCardController
         galTitle = NewSign(galleryWallRoot, "", 0.03f, Cream, Orange);
         galTitle.face = false;
         galCaption = Text(galleryWallRoot, "", 0.018f, Slate, Vector3.zero);
+        galCaption.anchor = TextAnchor.UpperCenter; // hangs from its top, so 2 or 3 lines never ride up into the title
 
         var header = NewSign(galleryWallRoot, "PORTFOLIO", 0.026f, Orange, Navy);
         header.face = false;
-        header.transform.localPosition = new Vector3(0, 0.2f, -0.01f);
+        header.transform.localPosition = new Vector3(0, 0.27f, -0.01f); // above the featured and zoomed frames
         var back = NewSign(galleryWallRoot, "< Back", 0.03f, Cream, Orange);
         back.face = false;
-        back.transform.localPosition = new Vector3(-0.4f, 0.2f, -0.01f);
+        back.transform.localPosition = new Vector3(-0.4f, 0.27f, -0.01f);
         AddTap(back.back.gameObject, 1f, () => { if (!busy) StartCoroutine(ExitGallery()); });
         var hint = NewSign(galleryWallRoot, items.Length > 1 ? "Swipe or tap a picture" : "Tap the picture to zoom", 0.018f, Slate, Navy);
         hint.face = false;
         galHint = hint.transform;
-        galHint.localPosition = new Vector3(0, -0.245f, -0.01f);
+        galHint.localPosition = new Vector3(0.36f, -0.235f, -0.01f); // under the thumbnail column, clear of the caption
 
         ResetGallery();
     }
@@ -196,7 +197,7 @@ public partial class BusinessCardController
             }
             else
             {
-                spot = new Vector3(0.36f, 0.13f - rank * 0.15f, 0);
+                spot = new Vector3(0.36f, 0.15f - rank * 0.14f, 0);
                 scale = zoomed ? 0.001f : ThumbScale;
                 rank++;
             }
@@ -206,9 +207,9 @@ public partial class BusinessCardController
             f.localRotation = Quaternion.Slerp(f.localRotation, tilt, k);
         }
         var textSpot = zoomed ? ZoomedSpot.x : FeaturedSpot.x;
-        float bottom = zoomed ? 0.06f - FrameHeight * ZoomScale / 2 : FeaturedSpot.y - FrameHeight / 2;
+        float bottom = zoomed ? ZoomedSpot.y - FrameHeight * ZoomScale / 2 : FeaturedSpot.y - FrameHeight / 2;
         galTitle.transform.localPosition = Vector3.Lerp(galTitle.transform.localPosition, new Vector3(textSpot, bottom - 0.045f, -0.01f), k);
-        galCaption.transform.localPosition = Vector3.Lerp(galCaption.transform.localPosition, new Vector3(textSpot, bottom - 0.115f, -0.01f), k);
+        galCaption.transform.localPosition = Vector3.Lerp(galCaption.transform.localPosition, new Vector3(textSpot, bottom - 0.09f, -0.01f), k);
     }
 
     static float Exp(float x) => Mathf.Exp(x);

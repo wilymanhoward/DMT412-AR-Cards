@@ -469,23 +469,124 @@ public static class BusinessCardBuilder
         const float seat = 0.04f, deskTop = 0.086f;
         animator.transform.localPosition += Vector3.down * 0.048f;
 
-        Cube("Seat", rig, new Vector3(0, seat - 0.004f, -0.008f), new Vector3(0.056f, 0.008f, 0.056f), orangeMat);
-        Cube("Chair Back", rig, new Vector3(0, seat + 0.036f, -0.038f), new Vector3(0.056f, 0.07f, 0.007f), orangeMat);
-        Primitive(PrimitiveType.Cylinder, "Chair Post", rig, new Vector3(0, seat / 2 - 0.004f, -0.008f), new Vector3(0.008f, seat / 2 - 0.004f, 0.008f), navyMat);
-        Primitive(PrimitiveType.Cylinder, "Chair Base", rig, new Vector3(0, 0.004f, -0.008f), new Vector3(0.05f, 0.003f, 0.05f), navyMat);
+        var steelMat = Standard("Biz_Steel", Hex("B9BFC9"), 0.8f, 0.9f, null);
+        var slateMat = Standard("Biz_Slate", Slate, 0.25f, 0f, null);
+        var darkMat = Standard("Biz_Dark", Hex("0B1222"), 0.6f, 0.1f, null);
+        var leafMat = Standard("Biz_Leaf", Hex("3E9B4F"), 0.35f, 0f, null);
+        var coffeeMat = Standard("Biz_Coffee", Hex("3B2416"), 0.85f, 0f, null);
+        var bulbMat = Standard("Biz_Bulb", Cream, 0.5f, 0f, Hex("FFE7B0"));
+        var ledMat = Standard("Biz_Led", Orange, 0.5f, 0f, Orange * 1.5f);
+        Transform Turn(Transform t, float x, float y, float z) { t.localRotation = Quaternion.Euler(x, y, z); return t; }
+        // a cylinder from a to b
+        Transform Rod(string name, Vector3 a, Vector3 b, float width, Material mat)
+        {
+            var t = Primitive(PrimitiveType.Cylinder, name, rig, (a + b) / 2, new Vector3(width, Vector3.Distance(a, b) / 2, width), mat);
+            t.localRotation = Quaternion.FromToRotation(Vector3.up, b - a);
+            return t;
+        }
 
-        Cube("Desk Top", rig, new Vector3(0, deskTop - 0.002f, 0.11f), new Vector3(0.16f, 0.004f, 0.11f), creamMat);
-        foreach (var (x, z) in new[] { (-0.07f, 0.065f), (0.07f, 0.065f), (-0.07f, 0.155f), (0.07f, 0.155f) })
-            Cube("Desk Leg", rig, new Vector3(x, deskTop / 2 - 0.002f, z), new Vector3(0.006f, deskTop - 0.004f, 0.006f), navyMat);
+        // the office chair: a padded seat and a reclined, curved back with a headrest pillow, armrests, a chrome
+        // gas lift and a five-star base on casters
+        var chair = new Vector3(0, 0, -0.008f);
+        Cube("Seat Shell", rig, chair + new Vector3(0, seat - 0.007f, 0), new Vector3(0.054f, 0.004f, 0.054f), navyMat);
+        Primitive(PrimitiveType.Sphere, "Seat", rig, chair + new Vector3(0, seat - 0.003f, 0), new Vector3(0.058f, 0.011f, 0.057f), orangeMat);
+        var back = NewChild("Chair Back", rig);
+        back.localPosition = chair + new Vector3(0, seat, -0.03f);
+        back.localRotation = Quaternion.Euler(-10, 0, 0); // a little recline
+        for (int k = -2; k <= 2; k++) // five slats on a curve, so the back hugs him
+        {
+            var slat = Cube("Back Pad", back, new Vector3(k * 0.0112f, 0.036f, Mathf.Abs(k) * Mathf.Abs(k) * 0.0012f), new Vector3(0.0118f, 0.062f, 0.008f), orangeMat);
+            slat.localRotation = Quaternion.Euler(0, -k * 9f, 0);
+        }
+        Cube("Back Frame", back, new Vector3(0, 0.034f, -0.006f), new Vector3(0.05f, 0.058f, 0.004f), navyMat);
+        Primitive(PrimitiveType.Capsule, "Headrest", back, new Vector3(0, 0.074f, 0.001f), new Vector3(0.012f, 0.016f, 0.009f), navyMat).localRotation = Quaternion.Euler(0, 0, 90);
+        Cube("Back Stem", rig, chair + new Vector3(0, seat - 0.006f, -0.029f), new Vector3(0.012f, 0.012f, 0.006f), navyMat);
+        foreach (float side in new[] { -1f, 1f })
+        {
+            Cube("Arm Post", rig, chair + new Vector3(side * 0.031f, seat + 0.006f, -0.008f), new Vector3(0.004f, 0.022f, 0.006f), navyMat);
+            Turn(Primitive(PrimitiveType.Capsule, "Arm Pad", rig, chair + new Vector3(side * 0.031f, seat + 0.018f, -0.004f), new Vector3(0.007f, 0.014f, 0.005f), slateMat), 90, 0, 0);
+        }
+        Primitive(PrimitiveType.Cylinder, "Gas Lift", rig, chair + new Vector3(0, seat / 2 + 0.002f, 0), new Vector3(0.006f, seat / 2 - 0.008f, 0.006f), steelMat);
+        Primitive(PrimitiveType.Cylinder, "Lift Sleeve", rig, chair + new Vector3(0, 0.014f, 0), new Vector3(0.01f, 0.008f, 0.01f), navyMat);
+        for (int k = 0; k < 5; k++)
+        {
+            float a = k * 72f;
+            var dir = Quaternion.Euler(0, a, 0) * Vector3.forward;
+            Turn(Cube("Base Leg", rig, chair + dir * 0.013f + Vector3.up * 0.007f, new Vector3(0.005f, 0.003f, 0.026f), navyMat), 0, a, 0);
+            Turn(Primitive(PrimitiveType.Cylinder, "Caster", rig, chair + dir * 0.026f + Vector3.up * 0.003f, new Vector3(0.006f, 0.002f, 0.006f), darkMat), 0, a, 90);
+        }
 
-        Cube("Keyboard", rig, new Vector3(0, deskTop + 0.002f, 0.075f), new Vector3(0.06f, 0.004f, 0.02f), navyMat);
-        Cube("Mouse", rig, new Vector3(0.05f, deskTop + 0.002f, 0.078f), new Vector3(0.011f, 0.004f, 0.016f), orangeMat);
-        Primitive(PrimitiveType.Cylinder, "Mug", rig, new Vector3(-0.063f, deskTop + 0.008f, 0.12f), new Vector3(0.014f, 0.008f, 0.014f), orangeMat);
+        // the desk: a cream top on a navy edge band, a three-drawer pedestal on his left with orange pulls,
+        // a steel leg frame on his right and a modesty panel at the back
+        Cube("Desk Top", rig, new Vector3(0, deskTop - 0.0015f, 0.11f), new Vector3(0.16f, 0.003f, 0.11f), creamMat);
+        Cube("Desk Edge", rig, new Vector3(0, deskTop - 0.0045f, 0.11f), new Vector3(0.158f, 0.003f, 0.108f), navyMat);
+        const float pedX = -0.058f, pedW = 0.04f, pedH = deskTop - 0.006f;
+        Cube("Pedestal", rig, new Vector3(pedX, pedH / 2, 0.112f), new Vector3(pedW, pedH, 0.1f), navyMat);
+        for (int k = 0; k < 3; k++)
+        {
+            float y = pedH * (k + 0.5f) / 3;
+            Cube("Drawer", rig, new Vector3(pedX, y, 0.0615f), new Vector3(pedW - 0.004f, pedH / 3 - 0.003f, 0.002f), slateMat);
+            Cube("Drawer Pull", rig, new Vector3(pedX, y + pedH / 9, 0.0598f), new Vector3(0.014f, 0.0022f, 0.0016f), orangeMat);
+        }
+        foreach (float z in new[] { 0.062f, 0.158f })
+        {
+            Cube("Desk Leg", rig, new Vector3(0.074f, deskTop / 2 - 0.003f, z), new Vector3(0.005f, deskTop - 0.006f, 0.005f), steelMat);
+            Cube("Leg Foot", rig, new Vector3(0.074f, 0.0015f, z), new Vector3(0.008f, 0.003f, 0.012f), navyMat);
+        }
+        Cube("Leg Rail", rig, new Vector3(0.074f, 0.012f, 0.11f), new Vector3(0.004f, 0.004f, 0.096f), steelMat);
+        Cube("Modesty Panel", rig, new Vector3(0.008f, deskTop - 0.026f, 0.162f), new Vector3(0.13f, 0.04f, 0.003f), navyMat);
 
+        // on the desk: a desk mat, a keyboard with real rows of keys, a rounded mouse, a mug of coffee,
+        // a little plant and a desk lamp
+        Cube("Desk Mat", rig, new Vector3(0.012f, deskTop + 0.0004f, 0.077f), new Vector3(0.088f, 0.0008f, 0.03f), slateMat);
+        Cube("Keyboard", rig, new Vector3(0, deskTop + 0.0025f, 0.075f), new Vector3(0.06f, 0.0035f, 0.02f), navyMat);
+        for (int row = 0; row < 4; row++)
+            for (int col = 0; col < 12; col++)
+            {
+                float x = -0.0264f + col * 0.0048f + (row % 2) * 0.0012f;
+                if (row == 3 && col >= 3 && col <= 8) { if (col == 3) Cube("Space Bar", rig, new Vector3(-0.0012f, deskTop + 0.0049f, 0.0675f), new Vector3(0.026f, 0.0015f, 0.0034f), creamMat); continue; }
+                Cube("Key", rig, new Vector3(x, deskTop + 0.0049f, 0.0815f - row * 0.0045f), new Vector3(0.0038f, 0.0015f, 0.0036f), row == 0 && col == 0 ? orangeMat : creamMat);
+            }
+        Primitive(PrimitiveType.Sphere, "Mouse", rig, new Vector3(0.05f, deskTop + 0.0025f, 0.078f), new Vector3(0.011f, 0.0065f, 0.016f), orangeMat);
+        Cube("Mouse Wheel", rig, new Vector3(0.05f, deskTop + 0.0055f, 0.082f), new Vector3(0.0015f, 0.0015f, 0.003f), darkMat);
+
+        var mug = new Vector3(-0.062f, deskTop, 0.09f);
+        Primitive(PrimitiveType.Cylinder, "Mug", rig, mug + Vector3.up * 0.008f, new Vector3(0.013f, 0.008f, 0.013f), orangeMat);
+        Primitive(PrimitiveType.Cylinder, "Coffee", rig, mug + Vector3.up * 0.0155f, new Vector3(0.011f, 0.0006f, 0.011f), coffeeMat);
+        Turn(Primitive(PrimitiveType.Capsule, "Mug Handle", rig, mug + new Vector3(0.0078f, 0.008f, 0), new Vector3(0.0025f, 0.004f, 0.0025f), orangeMat), 0, 0, 0);
+        Cube("Handle Top", rig, mug + new Vector3(0.0068f, 0.0115f, 0), new Vector3(0.003f, 0.002f, 0.0022f), orangeMat);
+        Cube("Handle Bottom", rig, mug + new Vector3(0.0068f, 0.0045f, 0), new Vector3(0.003f, 0.002f, 0.0022f), orangeMat);
+
+        var plant = new Vector3(-0.066f, deskTop, 0.148f);
+        Primitive(PrimitiveType.Cylinder, "Pot", rig, plant + Vector3.up * 0.007f, new Vector3(0.014f, 0.007f, 0.014f), creamMat);
+        Primitive(PrimitiveType.Cylinder, "Pot Rim", rig, plant + Vector3.up * 0.0135f, new Vector3(0.0155f, 0.0012f, 0.0155f), orangeMat);
+        Primitive(PrimitiveType.Cylinder, "Soil", rig, plant + Vector3.up * 0.0143f, new Vector3(0.012f, 0.0005f, 0.012f), coffeeMat);
+        for (int k = 0; k < 7; k++) // leaves fanning up and out
+        {
+            float a = k * 51f, tilt = k == 0 ? 0 : 35f + (k % 2) * 15f;
+            var leaf = Primitive(PrimitiveType.Sphere, "Leaf", rig, plant + Vector3.up * 0.015f, new Vector3(0.006f, 0.022f, 0.0025f), leafMat);
+            leaf.localRotation = Quaternion.Euler(0, a, 0) * Quaternion.Euler(tilt, 0, 0);
+            leaf.localPosition += leaf.localRotation * Vector3.up * 0.01f;
+        }
+
+        var lamp = new Vector3(0.066f, deskTop, 0.152f);
+        Primitive(PrimitiveType.Cylinder, "Lamp Base", rig, lamp + Vector3.up * 0.0015f, new Vector3(0.018f, 0.0015f, 0.018f), navyMat);
+        Vector3 elbow = lamp + new Vector3(0.006f, 0.042f, 0.004f), head = lamp + new Vector3(0f, 0.05f, -0.035f); // beside the monitor, not in front of it
+        Rod("Lamp Arm", lamp + Vector3.up * 0.002f, elbow, 0.0025f, steelMat);
+        Rod("Lamp Arm", elbow, head, 0.0025f, steelMat);
+        Primitive(PrimitiveType.Sphere, "Lamp Joint", rig, elbow, Vector3.one * 0.004f, orangeMat);
+        var shade = Primitive(PrimitiveType.Cylinder, "Lamp Shade", rig, head, new Vector3(0.016f, 0.006f, 0.016f), orangeMat);
+        shade.localRotation = Quaternion.FromToRotation(Vector3.up, new Vector3(0.3f, 1f, 0.5f)); // the open end tips down toward the keyboard
+        Primitive(PrimitiveType.Sphere, "Lamp Bulb", rig, head - shade.localRotation * Vector3.up * 0.005f, Vector3.one * 0.009f, bulbMat);
+
+        // the monitor: a thin bezel on a tilted arm and an oval foot, a rounded back housing and a power light
         float monitorY = deskTop + 0.047f, monitorZ = 0.14f;
-        Cube("Monitor Stand", rig, new Vector3(0, deskTop + 0.012f, monitorZ), new Vector3(0.008f, 0.024f, 0.008f), navyMat);
-        Cube("Monitor Foot", rig, new Vector3(0, deskTop + 0.001f, monitorZ), new Vector3(0.04f, 0.002f, 0.022f), navyMat);
-        Cube("Monitor", rig, new Vector3(0, monitorY, monitorZ), new Vector3(0.104f, 0.062f, 0.006f), navyMat);
+        Primitive(PrimitiveType.Cylinder, "Monitor Foot", rig, new Vector3(0, deskTop + 0.0012f, monitorZ + 0.004f), new Vector3(0.042f, 0.0012f, 0.024f), navyMat);
+        Turn(Cube("Monitor Stand", rig, new Vector3(0, deskTop + 0.014f, monitorZ + 0.008f), new Vector3(0.01f, 0.028f, 0.004f), steelMat), -12, 0, 0);
+        Cube("Monitor Back", rig, new Vector3(0, monitorY - 0.002f, monitorZ + 0.0055f), new Vector3(0.07f, 0.04f, 0.006f), navyMat);
+        Cube("Monitor", rig, new Vector3(0, monitorY, monitorZ), new Vector3(0.104f, 0.062f, 0.006f), darkMat);
+        Cube("Chin", rig, new Vector3(0, monitorY - 0.0335f, monitorZ - 0.0005f), new Vector3(0.104f, 0.005f, 0.0065f), navyMat);
+        Cube("Power Light", rig, new Vector3(0.045f, monitorY - 0.0335f, monitorZ - 0.0036f), new Vector3(0.003f, 0.0012f, 0.0008f), ledMat);
         float faceZ = monitorZ - 0.0035f; // the screen side, toward him (a Quad shows its face toward -z)
         var codeMat = MakeMaterial("Biz_Screen_Code", "Unlit/Texture", MakeScreenTexture("Biz_Code.png", true));
         var gameMat = MakeMaterial("Biz_Screen_Game", "Unlit/Texture", MakeScreenTexture("Biz_Game.png", false));
