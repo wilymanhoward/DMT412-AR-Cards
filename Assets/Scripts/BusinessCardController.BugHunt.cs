@@ -582,6 +582,7 @@ public partial class BusinessCardController
         if (!cleared) PlaySfx(Voice(newBest ? "new_highscore" : "game_over"));
         if (cleared)
         {
+            BugHuntCleared(levelNo);
             avatarAnim.CrossFade("Cheer", 0.2f);
             ShowBubble(levelNo >= 3 ? "You're a machine! Ready for more?" : "Nice! Ready for the next one?", 3f);
             for (int i = 0; i < 3; i++) { Burst(results.position + Random.insideUnitSphere * 0.08f, 25); yield return new WaitForSeconds(0.15f); }

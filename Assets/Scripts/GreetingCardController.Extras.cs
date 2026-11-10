@@ -73,6 +73,10 @@ public partial class GreetingCardController
             if (child.name == "Recap Panel") recapPanel = (RectTransform)child;
         BuildLetter();
         BuildPhotoButton();
+
+        // the reindeer are one static mesh: make their legs gallop while the sleigh flies (LegRunner.cs)
+        foreach (var mf in sleigh.GetComponentsInChildren<MeshFilter>(true))
+            if (mf.name == "sleigh-reindeers-wood") LegRunner.Attach(mf, sleigh.forward, sleigh.up);
     }
 
     void ResetExtras()

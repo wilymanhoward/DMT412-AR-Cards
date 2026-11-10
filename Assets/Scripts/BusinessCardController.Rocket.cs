@@ -39,7 +39,7 @@ public partial class BusinessCardController
     AudioClip teleportClip, yankClip, snapClip, achievementClip, rumbleClip, bangClip;
     GameObject eggPanel;
     RectTransform eggRect, eggIcon;
-    Text eggTitle, eggSub;
+    Text eggTitle, eggSub, eggHead;
 
     // ---------- Building ----------
 
@@ -386,8 +386,6 @@ public partial class BusinessCardController
         var panel = Box("Achievement", ui.root.transform, NavyGlass);
         eggRect = panel.rectTransform;
         Place(eggRect, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, 260), new Vector2(760, 200), new Vector2(0.5f, 1));
-        var edge = Box("Edge", panel.transform, Orange);
-        Place(edge.rectTransform, new Vector2(0, 0), new Vector2(0, 1), Vector2.zero, new Vector2(14, 0), new Vector2(0, 0.5f));
         var back = Box("Trophy Back", panel.transform, NavyLight);
         Place(back.rectTransform, new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(40, 0), new Vector2(136, 136), new Vector2(0, 0.5f));
         var tex = Resources.Load<Texture2D>("Icons/icon_trophy");
@@ -395,7 +393,8 @@ public partial class BusinessCardController
         eggIcon = Icon(back.transform, sprite, new Color(1f, 0.8f, 0.25f), 96).rectTransform;
         eggTitle = Label(panel.transform, "", 28, Orange, FontStyle.Bold, TextAnchor.MiddleLeft);
         Place(eggTitle.rectTransform, new Vector2(0, 0.5f), new Vector2(1, 0.5f), new Vector2(97, 52), new Vector2(-234, 40));
-        var head = Label(panel.transform, "Easter Egg Hunter", 50, Cream, FontStyle.Bold, TextAnchor.MiddleLeft);
+        eggHead = Label(panel.transform, "Easter Egg Hunter", 50, Cream, FontStyle.Bold, TextAnchor.MiddleLeft);
+        var head = eggHead;
         Place(head.rectTransform, new Vector2(0, 0.5f), new Vector2(1, 0.5f), new Vector2(97, 4), new Vector2(-234, 64));
         eggSub = Label(panel.transform, "", 28, Slate, FontStyle.Normal, TextAnchor.MiddleLeft);
         Place(eggSub.rectTransform, new Vector2(0, 0.5f), new Vector2(1, 0.5f), new Vector2(97, -50), new Vector2(-234, 40));
@@ -700,25 +699,7 @@ public partial class BusinessCardController
         canopy.localScale = Vector3.Scale(canopySize, new Vector3(1 + breathe, 1 - breathe * 1.5f, 1 + breathe));
     }
 
-    IEnumerator ShowAchievement()
-    {
-        bool first = PlayerPrefs.GetInt(EggKey, 0) == 0;
-        PlayerPrefs.SetInt(EggKey, 1);
-        PlayerPrefs.Save();
-        eggTitle.text = first ? "ACHIEVEMENT UNLOCKED" : "ACHIEVEMENT";
-        eggSub.text = first ? "Found the secret in the logo" : "Found again!";
-        eggPanel.SetActive(true);
-        PlaySfx(achievementClip ? achievementClip : sparkleClip);
-        Haptics.Buzz(40, Haptics.Medium);
-        yield return Ease.Run(0.45f, t =>
-        {
-            eggRect.anchoredPosition = new Vector2(0, Mathf.LerpUnclamped(260, -160, Ease.OutBack(t, 1.2f)));
-            eggIcon.localScale = Vector3.one * Mathf.Max(0.001f, Ease.OutBack(Mathf.Clamp01(t * 1.6f - 0.4f), 2f));
-        });
-        yield return new WaitForSeconds(3f);
-        yield return Ease.Run(0.35f, t => eggRect.anchoredPosition = new Vector2(0, Mathf.Lerp(-160, 260, Ease.InCubic(t))));
-        eggPanel.SetActive(false);
-    }
+    IEnumerator ShowAchievement() => ShowBadge(EggKey, "Easter Egg Hunter", "Found the secret in the logo"); // BusinessCardController.Extras.cs
 
     // ---------- Every frame ----------
 

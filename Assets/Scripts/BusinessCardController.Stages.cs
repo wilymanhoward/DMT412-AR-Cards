@@ -392,6 +392,11 @@ public partial class BusinessCardController
             sign.face = false;
             sign.transform.localPosition = new Vector3(0, -0.085f, -0.01f);
         }
+        // above the row (below it, it ran into the node underneath): put me straight into your phone's contacts
+        var save = NewSign(row.transform, "+ Save my contact", 0.026f, Cream, Orange);
+        save.face = false;
+        save.transform.localPosition = new Vector3(0, 0.1f, -0.01f);
+        AddTap(save.back.gameObject, 1.2f, SaveContact);
     }
 
     // A real envelope front: the orange top flap folded down to a point, the side and bottom folds in slightly

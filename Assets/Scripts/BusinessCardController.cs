@@ -38,7 +38,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
     [Header("Audio")]
     public AudioSource music, sfx;
     public AudioClip tickClip, openClip, pulseClip, powerupClip, sparkleClip, popClip;
-    [Range(0, 1)] public float musicVolume = 0.35f;
+    [Range(0, 1)] public float musicVolume = 0.8f;
 
     [Header("Art")]
     public Font font;
@@ -94,6 +94,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         BuildStages();
         BuildBugHunt();
         BuildRocket();
+        BuildExtras(); // BusinessCardController.Extras.cs
         ResetScene();
     }
 
@@ -157,6 +158,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         ResetGallery();
         ResetBugHunt();
         ResetRocket();
+        ResetExtras();
         ResetUi();
     }
 
@@ -167,6 +169,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
         Current = State.Intro;
         PlaySfx(powerupClip);
         motes.Play();
+        musicVolume = Mathf.Max(musicVolume, 0.8f); // the scene still holds the old, too quiet 0.35
         StartCoroutine(FadeMusic(musicVolume, 3f));
         yield return new WaitForSeconds(0.3f);
 
@@ -253,6 +256,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
     {
         if (Time.timeScale == 0 || Current == State.Idle) return;
         float t = Time.time, dt = Time.deltaTime;
+        UpdateExtras(t, dt);
         if (gallery) { UpdateGallery(dt); return; }
         if (Current >= State.Hub) Float(t, dt);
 
@@ -320,6 +324,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
 
     void HandleTap(Vector2 screen)
     {
+        if (NoteTap()) return; // a tap during the tour just stops it
         var hits = Physics.RaycastAll(arCamera.ScreenPointToRay(screen), 100f);
         System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
         if (!System.Array.Exists(hits, h => h.collider.transform.IsChildOf(logo))) CancelCharge(); // tapped away from a charging logo
@@ -332,7 +337,7 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
             var tap = hit.collider.GetComponentInParent<Tappable>();
             if (tap) { tap.onTap(); return; }
             for (int i = 0; i < hubs.Length; i++)
-                if (t.IsChildOf(hubs[i].node)) { OpenPanel(i); return; }
+                if (t.IsChildOf(hubs[i].node)) { MarkExplored(i); OpenPanel(i); return; }
             if (t.IsChildOf(logo)) { LogoTap(); return; } // 5 quick taps: the easter egg
             if (t.IsChildOf(avatar)) { turning = true; turned = false; turnStart = screen; turnFrom = avatar.localEulerAngles.y; turnPivot = avatar.localPosition + CentreOffset(turnFrom); return; }
         }
@@ -470,8 +475,13 @@ public partial class BusinessCardController : MonoBehaviour, ICardExperience
 
     // ---------- Helpers ----------
 
-    void Burst(Vector3 world, int count) =>
-        burst.Emit(new ParticleSystem.EmitParams { position = world, applyShapeToPosition = true }, count);
+    // Sparks (and, for a bigger moment, a puff of dust): see NaturalFx in BusinessCardController.Extras.cs.
+    void Burst(Vector3 world, int count)
+    {
+        var at = new ParticleSystem.EmitParams { position = world, applyShapeToPosition = true };
+        burst.Emit(at, Mathf.Max(2, count / 3)); // fewer, finer sparks read as real; dozens read as glitter
+        if (dust && count >= 12) dust.Emit(at, Mathf.Clamp(count / 8, 2, 8));
+    }
 
     void PlaySfx(AudioClip clip, float volume = 1f)
     {
